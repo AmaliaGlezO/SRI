@@ -9,6 +9,11 @@ from langchain_core.embeddings import Embeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from sklearn.feature_extraction.text import TfidfVectorizer
 
+from src.errors.vector_db_errors import (
+    EmbeddingModelNotFittedError,
+    EmbeddingsModelNotFoundError,
+    EmptyDocumentListError,
+)
 from src.indexing.indexer import InvertedIndex, TextNormalizer
 
 
@@ -36,7 +41,7 @@ class TfidfEmbeddings(Embeddings):
     def fit(self, documents: list[dict]) -> "TfidfEmbeddings":
         """Fit the TF-IDF model from a list of document dicts."""
         if not documents:
-            raise ValueError("Empty document list.")
+            raise EmptyDocumentListError("Empty document list.")
 
         texts = []
         for doc in documents:
@@ -52,13 +57,13 @@ class TfidfEmbeddings(Embeddings):
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
         if not self._fitted:
-            raise RuntimeError("Not fitted.")
+            raise EmbeddingModelNotFittedError("TF-IDF embeddings model is not fitted.")
         matrix = self._vectorizer.transform(texts)
         return matrix.toarray().astype(np.float32).tolist()
 
     def embed_query(self, text: str) -> list[float]:
         if not self._fitted:
-            raise RuntimeError("Not fitted.")
+            raise EmbeddingModelNotFittedError("TF-IDF embeddings model is not fitted.")
         vector = self._vectorizer.transform([text])
         return vector.toarray().astype(np.float32).flatten().tolist()
 
@@ -72,7 +77,7 @@ class TfidfEmbeddings(Embeddings):
     def load(cls, directory: str | Path) -> "TfidfEmbeddings":
         path = Path(directory) / "tfidf_embeddings.pkl"
         if not path.exists():
-            raise FileNotFoundError(f"Missing embeddings model at {path}")
+            raise EmbeddingsModelNotFoundError(f"Missing embeddings model at {path}")
         with open(path, "rb") as fh:
             return pickle.load(fh)
 

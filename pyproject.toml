@@ -20,6 +20,7 @@ dependencies = [
     "langchain-community",
     "sentence-transformers",
     "emoji>=2.15.0",
+     "duckduckgo-search>=8.1.1"
 ]
 
 [dependency-groups]

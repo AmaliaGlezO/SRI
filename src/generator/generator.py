@@ -1,9 +1,15 @@
 from pathlib import Path
 
+from src.errors.llm_errors import (
+    LLMDependencyError,
+    LLMGenerationError,
+    LLMModelNotFoundError,
+)
+
 try:
     from llama_cpp import Llama
 except ImportError:
-    raise ImportError(
+    raise LLMDependencyError(
         "llama-cpp-python not installed. Run: uv pip install llama-cpp-python"
     )
 
@@ -39,7 +45,7 @@ class LocalLLM:
 
         self.model_path = Path(model_path) if model_path else self._default_model_path()
         if not self.model_path.is_file():
-            raise FileNotFoundError(
+            raise LLMModelNotFoundError(
                 f"Model file not found: {self.model_path}\n"
                 "Run: uv run python download_model.py --model tinyllama"
             )
@@ -67,7 +73,7 @@ class LocalLLM:
         """Find default model in models/ directory."""
         default_dir = Path("models")
         if not default_dir.is_dir():
-            raise FileNotFoundError(
+            raise LLMModelNotFoundError(
                 "Models directory not found. "
                 "Run: uv run python download_model.py --model tinyllama"
             )
@@ -77,7 +83,7 @@ class LocalLLM:
                 if candidate.suffix.lower() == ext:
                     return candidate
 
-        raise FileNotFoundError(
+        raise LLMModelNotFoundError(
             "No .gguf or .bin model file found in 'models/' folder. "
             "Run: uv run python download_model.py --model tinyllama"
         )
@@ -107,14 +113,17 @@ class LocalLLM:
         str
             Generated text.
         """
-        output = self._llm(
-            prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            stop=stop or [],
-            echo=False,
-        )
-        return output["choices"][0]["text"].strip()
+        try:
+            output = self._llm(
+                prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stop=stop or [],
+                echo=False,
+            )
+            return output["choices"][0]["text"].strip()
+        except Exception as exc:
+            raise LLMGenerationError("Text generation failed.") from exc
 
     def chat(self, messages: list[dict], **kwargs) -> str:
         """Chat format generation.
@@ -130,5 +139,8 @@ class LocalLLM:
         str
             Assistant's response.
         """
-        response = self._llm.create_chat_completion(messages=messages, **kwargs)
-        return response["choices"][0]["message"]["content"].strip()
+        try:
+            response = self._llm.create_chat_completion(messages=messages, **kwargs)
+            return response["choices"][0]["message"]["content"].strip()
+        except Exception as exc:
+            raise LLMGenerationError("Chat completion failed.") from exc

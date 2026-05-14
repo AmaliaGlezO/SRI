@@ -4,6 +4,10 @@ import math
 import pickle
 from pathlib import Path
 
+from src.errors.retrieval_errors import (
+    RetrieverModelNotFoundError,
+    RetrieverNotInitializedError,
+)
 from src.indexing.indexer import InvertedIndex, TextNormalizer
 
 
@@ -88,7 +92,9 @@ class LMRetriever:
         Accepts either a raw string query or a dictionary of `{term: weight}`.
         """
         if self.index is None:
-            raise RuntimeError("LMRetriever not initialised with an InvertedIndex.")
+            raise RetrieverNotInitializedError(
+                "LMRetriever not initialised with an InvertedIndex."
+            )
 
         q_weights: dict[str, float] = {}
 
@@ -212,10 +218,17 @@ class LMRetriever:
         model_path = path / cls.MODEL_FILE
 
         if not model_path.exists():
-            raise FileNotFoundError(f"Missing language model file at {model_path}")
+            raise RetrieverModelNotFoundError(
+                f"Missing language model file at {model_path}"
+            )
 
-        with open(model_path, "rb") as fh:
-            state = pickle.load(fh)
+        try:
+            with open(model_path, "rb") as fh:
+                state = pickle.load(fh)
+        except Exception as exc:
+            raise RetrieverModelNotFoundError(
+                f"Unable to load language model state from {model_path}"
+            ) from exc
 
         retriever = cls(
             index=state.get("index"),

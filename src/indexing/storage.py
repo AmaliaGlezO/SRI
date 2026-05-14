@@ -5,6 +5,8 @@ import uuid
 from pathlib import Path
 from typing import Iterator
 
+from src.errors.indexing_errors import DocumentParseError, SnapshotLoadError
+
 
 class DocumentStore:
     """
@@ -54,7 +56,10 @@ class DocumentStore:
                 try:
                     raw = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    print(f"[DocumentStore] JSON error {path}:{line_no}: {exc}")
+                    err = DocumentParseError(
+                        f"Invalid JSON in {path} at line {line_no}: {exc}"
+                    )
+                    print(f"[DocumentStore] {err}")
                     continue
 
                 doc = self._normalise(raw, category=category)
@@ -150,10 +155,16 @@ class DocumentStore:
         store = cls.__new__(cls)
         store.data_dir = Path(path).parent
         store._docs = {}
-        with open(path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line:
-                    doc = json.loads(line)
-                    store._docs[doc["id"]] = doc
+        line_no = 0
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for line_no, line in enumerate(fh, start=1):
+                    line = line.strip()
+                    if line:
+                        doc = json.loads(line)
+                        store._docs[doc["id"]] = doc
+        except Exception as exc:
+            raise SnapshotLoadError(
+                f"Failed to load snapshot from {path} (line {line_no})."
+            ) from exc
         return store

@@ -4,6 +4,11 @@ from src.retrieval.lm_retriever import LMRetriever
 from src.retrieval.query_processor import QueryProcessor
 import os
 import numpy as np
+from src.errors.indexing_errors import IndexingError
+from src.errors.llm_errors import LLMError
+from src.errors.rag_errors import RAGError
+from src.errors.retrieval_errors import RetrievalError
+from src.errors.vector_db_errors import VectorDBError
 from src.rag.rag import RAGPipeline
 from src.vector_db.embeddings import get_embeddings
 from src.vector_db.vector_store import VectorStore
@@ -44,27 +49,30 @@ def get_or_create_system(normaliser, force=False):
 
 
 def main():
-    normalizer = TextNormalizer()
+    try:
+        normalizer = TextNormalizer()
 
-    # Initialize both retrieval systems
-    lm_retriever, vector_store = get_or_create_system(normalizer, force=True)
+        # Initialize both retrieval systems
+        lm_retriever, vector_store = get_or_create_system(normalizer, force=True)
 
-    # Initialize LangChain RAG Pipeline
-    rag = RAGPipeline(
-        retriever_lm=lm_retriever,
-        vector_store=vector_store,
-        model_path="models/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
-    )
+        # Initialize LangChain RAG Pipeline
+        rag = RAGPipeline(
+            retriever_lm=lm_retriever,
+            vector_store=vector_store,
+            model_path="models/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
+        )
 
-    query = "dame una lista de Modelos de celulares de la marca samsung 2026"
+        query = "dame una lista de Modelos de celulares de la marca samsung 2026"
 
-    res = rag.answer(query=query)
+        res = rag.answer(query=query)
 
-    print("\n--- RESPUESTA GENERADA ---")
-    print(res["answer"])
-    print("\n--- FUENTES ---")
-    for src in res["sources"]:
-        print(f"- {src['title']} ({src['url']})")
+        print("\n--- RESPUESTA GENERADA ---")
+        print(res["answer"])
+        print("\n--- FUENTES ---")
+        for src in res["sources"]:
+            print(f"- {src['title']} ({src['url']})")
+    except (IndexingError, RetrievalError, VectorDBError, LLMError, RAGError) as exc:
+        print(f"[SRI Error] {exc}")
 
 
 if __name__ == "__main__":

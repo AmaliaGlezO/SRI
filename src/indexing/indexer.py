@@ -12,6 +12,13 @@ from nltk.stem import SnowballStemmer
 from nltk.tokenize import word_tokenize
 import emoji
 
+from src.errors.indexing_errors import (
+    IndexLoadError,
+    IndexPersistenceError,
+    InvalidDocumentError,
+    NltkResourceError,
+)
+
 
 def _ensure_nltk() -> None:
     """Ensure required NLTK data is available"""
@@ -23,7 +30,12 @@ def _ensure_nltk() -> None:
         try:
             nltk.data.find(resource_path)
         except LookupError:
-            nltk.download(download_id, quiet=True)
+            try:
+                nltk.download(download_id, quiet=True)
+            except Exception as exc:
+                raise NltkResourceError(
+                    f"Failed to download required NLTK resource: {download_id}"
+                ) from exc
 
 
 _ensure_nltk()
@@ -119,9 +131,18 @@ class InvertedIndex:
         self._N = 0
 
         for doc in documents:
+            if not isinstance(doc, dict):
+                raise InvalidDocumentError(
+                    "Each indexed document must be a dictionary."
+                )
             doc_id = str(doc.get("id") or doc.get("url", ""))
             title = doc.get("title", "") or ""
             content = doc.get("content", "") or ""
+
+            if not doc_id:
+                raise InvalidDocumentError(
+                    "Each document must define either 'id' or 'url'."
+                )
 
             text = title + " " + content
             tokens = self.normalizer.normalize(text)
@@ -156,25 +177,28 @@ class InvertedIndex:
     def save(self, directory: str | Path) -> None:
         """Persist the index to *directory* (created if absent)."""
         path = Path(directory)
-        path.mkdir(parents=True, exist_ok=True)
+        try:
+            path.mkdir(parents=True, exist_ok=True)
 
-        with open(path / self.INDEX_FILE, "wb") as fh:
-            pickle.dump(
-                {
-                    "index": dict(self._index),
-                    "doc_info": self._doc_info,
-                    "N": self._N,
-                },
-                fh,
-                protocol=pickle.HIGHEST_PROTOCOL,
-            )
+            with open(path / self.INDEX_FILE, "wb") as fh:
+                pickle.dump(
+                    {
+                        "index": dict(self._index),
+                        "doc_info": self._doc_info,
+                        "N": self._N,
+                    },
+                    fh,
+                    protocol=pickle.HIGHEST_PROTOCOL,
+                )
 
-        meta = {
-            "num_documents": self._N,
-            "vocabulary_size": len(self._vocab),
-        }
-        with open(path / self.META_FILE, "w", encoding="utf-8") as fh:
-            json.dump(meta, fh, indent=2, ensure_ascii=False)
+            meta = {
+                "num_documents": self._N,
+                "vocabulary_size": len(self._vocab),
+            }
+            with open(path / self.META_FILE, "w", encoding="utf-8") as fh:
+                json.dump(meta, fh, indent=2, ensure_ascii=False)
+        except Exception as exc:
+            raise IndexPersistenceError(f"Failed to persist index to {path}") from exc
 
         print(
             f"[InvertedIndex] Saved: {self._N} docs, "
@@ -185,15 +209,18 @@ class InvertedIndex:
     def load(cls, directory: str | Path) -> "InvertedIndex":
         """Load a previously saved index from *directory*."""
         path = Path(directory)
-        with open(path / cls.INDEX_FILE, "rb") as fh:
-            data = pickle.load(fh)
+        try:
+            with open(path / cls.INDEX_FILE, "rb") as fh:
+                data = pickle.load(fh)
 
-        idx = cls()
-        idx._index = defaultdict(dict, data["index"])
-        idx._doc_info = data["doc_info"]
-        idx._N = data["N"]
-        idx._vocab = set(idx._index.keys())
-        return idx
+            idx = cls()
+            idx._index = defaultdict(dict, data["index"])
+            idx._doc_info = data["doc_info"]
+            idx._N = data["N"]
+            idx._vocab = set(idx._index.keys())
+            return idx
+        except Exception as exc:
+            raise IndexLoadError(f"Failed to load index from {path}") from exc
 
     def __repr__(self) -> str:
         return f"InvertedIndex(docs={self._N}, " f"vocab={len(self._vocab)})"

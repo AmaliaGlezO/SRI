@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from src.errors.retrieval_errors import QueryFormatError, QueryProcessingError
 from src.indexing.indexer import TextNormalizer
 
 if TYPE_CHECKING:
@@ -55,15 +56,23 @@ class QueryProcessor:
         1. Normalise whitespace and casing
         2. Detect explicit filters (``source:xataka``)
         """
+        if not isinstance(raw_query, str):
+            raise QueryFormatError("Query must be a string.")
 
         query = self._clean(raw_query)
+        if not query:
+            raise QueryFormatError("Query must not be empty.")
         filters: dict[str, str] = {}
 
         # Extracts filter prefixes
-        text, filters = self._extract_filters(query)
-
-        tokens = self.normalizer.normalize_query(text)
-        text = " ".join(tokens)
+        try:
+            text, filters = self._extract_filters(query)
+            tokens = self.normalizer.normalize_query(text)
+            text = " ".join(tokens)
+        except QueryFormatError:
+            raise
+        except Exception as exc:
+            raise QueryProcessingError("Failed to process query.") from exc
 
         return ProcessedQuery(
             original=raw_query,
@@ -85,69 +94,74 @@ class QueryProcessor:
 
         Reference: Lavrenko & Croft (2001) - Relevance Based Language Models.
         """
-        if not retriever.index:
-            return orig_q_weights
+        try:
+            if not retriever.index:
+                return orig_q_weights
 
-        # Initial retrieval
-        initial_results = retriever.retrieve(orig_q_weights, top_k=prf_k)
-        if not initial_results:
-            return orig_q_weights
+            # Initial retrieval
+            initial_results = retriever.retrieve(orig_q_weights, top_k=prf_k)
+            if not initial_results:
+                return orig_q_weights
 
-        top_k_docs = [(r["id"], r["score"]) for r in initial_results]
+            top_k_docs = [(r["id"], r["score"]) for r in initial_results]
 
         # Exponentiate scores to probabilities P(d|q)
-        max_score = max(score for _, score in top_k_docs)
-        doc_probs = {
-            doc_id: math.exp(score - max_score) for doc_id, score in top_k_docs
-        }
+            max_score = max(score for _, score in top_k_docs)
+            doc_probs = {
+                doc_id: math.exp(score - max_score) for doc_id, score in top_k_docs
+            }
 
-        sum_probs = sum(doc_probs.values())
-        for d in doc_probs:
-            doc_probs[d] /= sum_probs
+            sum_probs = sum(doc_probs.values())
+            for d in doc_probs:
+                doc_probs[d] /= sum_probs
 
         # Compute RM1: P(w|R) = sum_{d} P(w|d) * P(d|q)
-        rm1_probs: dict[str, float] = {}
-        idx = retriever.index._index
-        doc_info = retriever.index._doc_info
+            rm1_probs: dict[str, float] = {}
+            idx = retriever.index._index
+            doc_info = retriever.index._doc_info
 
-        for doc_id, p_d_q in doc_probs.items():
-            doc_len = doc_info[doc_id].get("length", 0)
-            if doc_len == 0:
-                continue
+            for doc_id, p_d_q in doc_probs.items():
+                doc_len = doc_info[doc_id].get("length", 0)
+                if doc_len == 0:
+                    continue
 
-            # Iterate over all terms in the document to compute P(w|R)
-            for w, postings in idx.items():
-                if doc_id in postings:
-                    p_w_d = postings[doc_id] / doc_len
-                    rm1_probs[w] = rm1_probs.get(w, 0.0) + (p_w_d * p_d_q)
+                # Iterate over all terms in the document to compute P(w|R)
+                for w, postings in idx.items():
+                    if doc_id in postings:
+                        p_w_d = postings[doc_id] / doc_len
+                        rm1_probs[w] = rm1_probs.get(w, 0.0) + (p_w_d * p_d_q)
 
-        rm1_sum = sum(rm1_probs.values())
-        if rm1_sum > 0:
-            for w in rm1_probs:
-                rm1_probs[w] /= rm1_sum
+            rm1_sum = sum(rm1_probs.values())
+            if rm1_sum > 0:
+                for w in rm1_probs:
+                    rm1_probs[w] /= rm1_sum
 
         # Interpolate RM1 with the original query (RM3)
-        rm3_probs: dict[str, float] = {}
-        all_terms = set(orig_q_weights.keys()).union(set(rm1_probs.keys()))
+            rm3_probs: dict[str, float] = {}
+            all_terms = set(orig_q_weights.keys()).union(set(rm1_probs.keys()))
 
-        for w in all_terms:
-            p_orig = orig_q_weights.get(w, 0.0)
-            p_rm1 = rm1_probs.get(w, 0.0)
-            rm3_probs[w] = (prf_alpha * p_orig) + ((1.0 - prf_alpha) * p_rm1)
+            for w in all_terms:
+                p_orig = orig_q_weights.get(w, 0.0)
+                p_rm1 = rm1_probs.get(w, 0.0)
+                rm3_probs[w] = (prf_alpha * p_orig) + ((1.0 - prf_alpha) * p_rm1)
 
         #  Select top `prf_terms` from RM3
-        top_terms = sorted(rm3_probs.items(), key=lambda x: x[1], reverse=True)[
-            :prf_terms
-        ]
+            top_terms = sorted(rm3_probs.items(), key=lambda x: x[1], reverse=True)[
+                :prf_terms
+            ]
 
         # Re-normalize just the top terms
-        final_weights = {}
-        sum_top = sum(weight for _, weight in top_terms)
-        if sum_top > 0:
-            for w, weight in top_terms:
-                final_weights[w] = weight / sum_top
+            final_weights = {}
+            sum_top = sum(weight for _, weight in top_terms)
+            if sum_top > 0:
+                for w, weight in top_terms:
+                    final_weights[w] = weight / sum_top
 
-        return final_weights
+            return final_weights
+        except QueryFormatError:
+            raise
+        except Exception as exc:
+            raise QueryProcessingError("Failed to apply pseudo-relevance feedback.") from exc
 
     @staticmethod
     def _clean(text: str) -> str:

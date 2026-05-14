@@ -2,6 +2,7 @@ import re
 import scrapy
 from abc import ABC, abstractmethod
 from .items import Item, MobileItem, PCItem
+from src.errors.extract_data_errors import MissingSpiderNameError, MissingSpiderSourceError
 
 
 class Extract(scrapy.Spider, ABC):
@@ -17,9 +18,11 @@ class Extract(scrapy.Spider, ABC):
     def __init__(self, *args, **kwargs):
         super(Extract, self).__init__(*args, **kwargs)
         if self.name is None:
-            raise ValueError(f"{type(self).__name__} must have a name defined")
+            raise MissingSpiderNameError(
+                f"{type(self).__name__} must have a name defined"
+            )
         if self.source is None:
-            raise ValueError(
+            raise MissingSpiderSourceError(
                 f"{type(self).__name__} must have a source defined (github, xataka, etc.)"
             )
 

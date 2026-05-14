@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import pickle
 from pathlib import Path
 from typing import Any
@@ -88,9 +89,12 @@ def get_embeddings(
     """
     Factory function to get the improved embedding model.
     """
-    print(f"[Embeddings] Loading Transformer model: {model_name}...")
+    backend = os.environ.get("GGML_BACKEND", "cpu").lower()
+    device = "cuda" if backend in ("cuda", "metal") else "cpu"
+
+    print(f"[Embeddings] Loading Transformer model: {model_name} on {device}...")
     return HuggingFaceEmbeddings(
         model_name=model_name,
-        model_kwargs={"device": "cpu"},
+        model_kwargs={"device": device},
         encode_kwargs={"normalize_embeddings": True},
     )

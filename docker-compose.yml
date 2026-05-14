@@ -1,60 +1,127 @@
 services:
+
   api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     ports:
       - "8000:8000"
     environment:
       - PYTHONUNBUFFERED=1
-      - LOG_LEVEL=INFO
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - GGML_BACKEND=${GGML_BACKEND:-cpu}
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./models:/app/models
       - ./indexes:/app/indexes
-    networks:
-      - sri-network
     depends_on:
       - chroma
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+
+  crawl:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./indexes:/app/indexes
+    command: >
+      /bin/sh -c "
+        uv run scrapy crawl xataka_mobile > logs/xataka_mobile.log 2>&1 &
+        uv run scrapy crawl xataka_pc     > logs/xataka_pc.log 2>&1 &
+        wait && echo 'All spiders finished.'
+      "
+
+  index:
+    build: .
+    depends_on:
+      - crawl
+    volumes:
+      - ./data:/app/data
+      - ./indexes:/app/indexes
+    environment:
+      - GGML_BACKEND=${GGML_BACKEND:-cpu}
+    command: uv run python -m src.indexing.indexer
 
   chroma:
-    image: ghcr.io/chroma-core/chroma:latest
+    image: chromadb/chroma:0.5.5
+    volumes:
+      - ./indexes/chroma:/chroma/data
     ports:
       - "8001:8000"
-    volumes:
-      - chroma_data:/chroma/chroma
-    networks:
-      - sri-network
     environment:
       - IS_PERSISTENT=TRUE
-      - ALLOW_RESET=TRUE
+      - PERSIST_DIRECTORY=/chroma/data
 
-  # Testing service
-  tests:
+  vector-index:
+    build: .
+    depends_on:
+      - index
+      - chroma
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - GGML_BACKEND=${GGML_BACKEND:-cpu}
+    volumes:
+      - ./data:/app/data
+      - ./indexes:/app/indexes
+    command: uv run python main.py --build
+
+  query:
+    build: .
+    depends_on:
+      - vector-index
+      - chroma
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - GGML_BACKEND=${GGML_BACKEND:-cpu}
+    volumes:
+      - ./data:/app/data
+      - ./indexes:/app/indexes
+    stdin_open: true
+    tty: true
+    command: uv run python main.py --query
+
+  rag:
+    build: .
+    depends_on:
+      - vector-index
+      - chroma
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - GGML_BACKEND=${GGML_BACKEND:-cpu}
+    volumes:
+      - ./data:/app/data
+      - ./indexes:/app/indexes
+      - ./models:/app/models
+    stdin_open: true
+    tty: true
+    command: uv run python main.py --query --rag
+
+  rag-test:
+    build: .
+    depends_on:
+      - vector-index
+      - chroma
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - GGML_BACKEND=${GGML_BACKEND:-cpu}
+    volumes:
+      - ./data:/app/data
+      - ./indexes:/app/indexes
+      - ./tests:/app/tests
+    command: >
+      /bin/sh -c "
+        uv sync --group dev &&
+        uv run python -m pytest tests/test_rag.py -v
+      "
+
+  ui:
     build:
-      context: .
-      dockerfile: Dockerfile.test
+      context: ./ui
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
     depends_on:
       - api
-    volumes:
-      - ./tests:/app/tests
-      - ./coverage:/app/coverage
-    networks:
-      - sri-network
-    environment:
-      - PYTHONUNBUFFERED=1
-      - API_URL=http://api:8000
-
-networks:
-  sri-network:
-    driver: bridge
-
-volumes:
-  chroma_data:

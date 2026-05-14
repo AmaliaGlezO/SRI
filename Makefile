@@ -1,102 +1,92 @@
-.PHONY: help build up down logs test test-unit test-integration test-api clean rebuild
+.PHONY: help build up down logs clean test
 
 help:
-	@echo "SRI Application - Docker Commands"
-	@echo "=================================="
+	@echo "SRI - Sistema de Recuperación de Información"
+	@echo "=============================================="
 	@echo ""
-	@echo "Build and Run:"
-	@echo "  make build              - Build Docker images"
-	@echo "  make up                 - Start all services"
-	@echo "  make down               - Stop all services"
-	@echo "  make rebuild            - Rebuild and restart services"
+	@echo "Uso: make [comando]"
 	@echo ""
-	@echo "Logs:"
-	@echo "  make logs               - View API logs"
-	@echo "  make logs-chroma        - View Chroma logs"
-	@echo "  make logs-all           - View all logs"
+	@echo "Comandos disponibles:"
+	@echo "  make build              - Construir imagen Docker"
+	@echo "  make up                - Iniciar API + Chroma + UI"
+	@echo "  make down              - Detener todos los servicios"
+	@echo "  make api               - Iniciar solo API"
+	@echo "  make ui                - Iniciar solo UI"
+	@echo "  make crawl             - Ejecutar web scraping (spiders)"
+	@echo "  make vector-index      - Construir índices (TF-IDF + LM + Vector)"
+	@echo "  make query             - Interfaz de búsqueda CLI"
+	@echo "  make rag               - Búsqueda con RAG (generación)"
+	@echo "  make test              - Ejecutar tests"
+	@echo "  make logs              - Ver logs"
+	@echo "  make clean             - Limpiar contenedores y datos"
 	@echo ""
-	@echo "Testing:"
-	@echo "  make test               - Run all tests"
-	@echo "  make test-unit          - Run unit tests only"
-	@echo "  make test-integration   - Run integration tests only"
-	@echo "  make test-api           - Run API tests only"
-	@echo "  make test-coverage      - Run tests with coverage report"
+	@echo "Variables de entorno:"
+	@echo "  GGML_BACKEND=cpu       - CPU (default)"
+	@echo "  GGML_BACKEND=cuda      - NVIDIA GPU"
+	@echo "  GGML_BACKEND=metal     - Apple Silicon"
 	@echo ""
-	@echo "Utilities:"
-	@echo "  make clean              - Clean up containers and volumes"
-	@echo "  make shell              - Open shell in API container"
-	@echo "  make health             - Check service health status"
 
 build:
-	docker-compose build
+	docker-compose build --no-cache
 
 up:
-	docker-compose up -d
-	@echo "Services starting..."
-	@echo "API available at: http://localhost:8000"
-	@echo "Swagger docs at: http://localhost:8000/docs"
-	@echo "Chroma at: http://localhost:8001"
+	docker-compose up -d api chroma
+	@echo ""
+	@echo "Servicios iniciados:"
+	@echo "  - API:   http://localhost:8000"
+	@echo "  - Chroma: http://localhost:8001"
+	@echo "  - UI:    http://localhost:5173"
 
 down:
 	docker-compose down
 
 rebuild: down build up
-	@echo "Services rebuilt and restarted"
+
+api:
+	docker-compose up -d api
+
+ui:
+	docker-compose up -d ui
+
+crawl:
+	docker-compose up crawl
+
+index:
+	docker-compose up index
+
+vector-index:
+	docker-compose up vector-index
+
+query:
+	docker-compose up query
+
+rag:
+	docker-compose up rag
+
+test:
+	docker-compose up rag-test
 
 logs:
+	docker-compose logs -f
+
+logs-crawl:
+	docker-compose logs -f crawl
+
+logs-index:
+	docker-compose logs -f index
+
+logs-api:
 	docker-compose logs -f api
 
 logs-chroma:
 	docker-compose logs -f chroma
 
-logs-all:
-	docker-compose logs -f
-
-logs-clean:
-	docker-compose logs --tail=0
-
-test: test-unit test-integration test-api
-	@echo "All tests completed"
-
-test-unit:
-	docker-compose run --rm tests pytest tests/test_errors.py -v
-
-test-integration:
-	docker-compose run --rm tests pytest tests/test_integration.py -v
-
-test-api:
-	docker-compose run --rm tests pytest tests/test_api.py -v
-
-test-coverage:
-	docker-compose run --rm tests pytest tests/ -v --cov=src --cov-report=term-missing --cov-report=html:coverage
-
-test-watch:
-	docker-compose run --rm tests pytest tests/ -v --tb=short -w
-
-shell:
-	docker-compose exec api bash
-
-shell-tests:
-	docker-compose run --rm tests bash
-
-health:
-	@echo "Checking service health..."
-	@curl -s http://localhost:8000/health | jq . || echo "API not responding"
-	@echo ""
-	@echo "Checking Chroma..."
-	@curl -s http://localhost:8001/api/version | jq . || echo "Chroma not responding"
-
 clean:
 	docker-compose down -v
-	rm -rf coverage/
+	rm -rf indexes/* data/*.jsonl logs/*.log
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 	find . -type f -name "*.pyc" -delete
+	@echo "Limpieza completada"
 
 ps:
 	docker-compose ps
-
-restart:
-	docker-compose restart
-
-restart-api:
-	docker-compose restart api

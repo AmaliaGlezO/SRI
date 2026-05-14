@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 
 from src.config import (
     MODEL_MAX_TOKENS,
@@ -20,6 +21,14 @@ except ImportError:
     raise LLMDependencyError(
         "llama-cpp-python not installed. Run: uv pip install llama-cpp-python"
     )
+
+
+def _get_gpu_layers() -> int:
+    """Determine number of GPU layers based on GGML_BACKEND env var."""
+    backend = os.environ.get("GGML_BACKEND", "cpu").lower()
+    if backend in ("cuda", "metal"):
+        return 999  # Auto-detect all layers
+    return 0  # CPU only
 
 
 class LocalLLM:
@@ -59,19 +68,22 @@ class LocalLLM:
         if n_threads is None:
             n_threads = MODEL_N_THREADS
             if n_threads is None:
-                import os
                 n_threads = os.cpu_count() or 4
 
         self.n_threads = n_threads
         self.n_ctx = n_ctx if n_ctx is not None else MODEL_N_CTX
+        self.n_gpu_layers = _get_gpu_layers()
 
+        backend = os.environ.get("GGML_BACKEND", "cpu").upper()
         print(f"[LocalLLM] Loading model: {self.model_path.name}")
-        print(f"[LocalLLM] Threads: {n_threads}, Context: {n_ctx}")
+        print(f"[LocalLLM] Backend: {backend}, GPU layers: {self.n_gpu_layers}")
+        print(f"[LocalLLM] Threads: {n_threads}, Context: {self.n_ctx}")
 
         self._llm = Llama(
             model_path=str(self.model_path),
             n_threads=n_threads,
-            n_ctx=n_ctx,
+            n_ctx=self.n_ctx,
+            n_gpu_layers=self.n_gpu_layers,
             verbose=verbose,
         )
         self._initialized = True

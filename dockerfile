@@ -1,47 +1,46 @@
-# Multi-stage build for SRI Application
-FROM python:3.12-slim as builder
-
-WORKDIR /app
-
-# Install system dependencies for compilation
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    git \
-    cmake \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy pyproject.toml and install dependencies
-COPY pyproject.toml .
-RUN pip install --upgrade pip uv && \
-    uv pip install --system -e . && \
-    pip install -r <(uv pip compile pyproject.toml)
-
-# Runtime stage
 FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install runtime dependencies only
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    git \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Python packages from builder
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir uv && uv sync
 
-# Copy application code
 COPY . .
 
-# Create directories for data and logs
-RUN mkdir -p data logs models indexes
+ENV PYTHONPATH=/app
+ENV GGML_BACKEND=cpu
+ENV NLTK_DATA=/usr/local/share/nltk_data
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+RUN python - <<'PY'
+import io
+import os
+import urllib.request
+import zipfile
 
-# Expose port
-EXPOSE 8000
+base = "https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/packages"
+packages = {
+    "corpora": ["wordnet", "stopwords"],
+    "tokenizers": ["punkt_tab"],
+}
 
-# Run the API server
-CMD ["python", "-m", "src.api.server"]
+dest = os.environ.get("NLTK_DATA", "/usr/local/share/nltk_data")
+os.makedirs(dest, exist_ok=True)
+
+for group, names in packages.items():
+    out_dir = os.path.join(dest, group)
+    os.makedirs(out_dir, exist_ok=True)
+    for name in names:
+        url = f"{base}/{group}/{name}.zip"
+        with urllib.request.urlopen(url) as response:
+            data = response.read()
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            zf.extractall(out_dir)
+PY
+
+CMD ["python", "main.py"]

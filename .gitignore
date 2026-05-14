@@ -5,6 +5,7 @@ __pycache__/
 .opencode/
 # C extensions
 *.so
+logs/
 models/
 sistem.md
 start.sh

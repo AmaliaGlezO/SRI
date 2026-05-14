@@ -1,174 +1,173 @@
-# SRI RAG System
+# SRI - Sistema de Recuperación de Información
 
-Spanish Information Retrieval system using RAG (Retrieval-Augmented Generation) with hybrid search (LM + Vector) and automatic web search fallback.
+Sistema de Retrieval-Augmented Generation (RAG) con búsqueda híbrida y scraping de artículos tecnológicos.
 
-## Features
+## Requisitos
 
-- **Hybrid Retrieval**: Combines language model (LM) and vector database retrieval
-- **Automatic Web Search**: Falls back to internet search when local results are not relevant
-- **Configurable via Environment Variables**: All settings can be customized
-- **Automatic Model Download**: Downloads default model if not present
-- **Spanish Language Support**: Optimized for Spanish queries and documents
-- **REST API**: FastAPI-based API for easy integration
+- Docker y Docker Compose
+- Make
 
-## Installation
+---
+
+## Inicio Rápido
 
 ```bash
-# Install dependencies
-uv pip install -r requirements.txt
+# 1. Construir imagen Docker
+make build
 
-# Or using the setup script
-./setup.sh
+# 2. Iniciar servicios base (API + Chroma + UI)
+make up
 ```
 
-## Configuration
+**Servicios disponibles:**
+- API: http://localhost:8000
+- UI: http://localhost:5173
+- Chroma: http://localhost:8001
 
-The system can be configured via environment variables. Copy `.env.example` to `.env` and adjust values:
+---
+
+## Pipeline Completo (Paso a Paso)
+
+### Paso 1: Scraping
 
 ```bash
-cp .env.example .env
+make crawl
 ```
 
-### Environment Variables
+Ejecuta los spiders de Scrapy para obtener artículos de Xataka (PC y Mobile). Los artículos se guardan en `data/*.jsonl`.
 
-#### Model Configuration
-
-- `MODEL_PATH`: Path to model file (empty = use default TinyLlama, will download if missing)
-- `MODEL_TEMPERATURE`: LLM sampling temperature (default: 0.3)
-- `MODEL_MAX_TOKENS`: Maximum tokens to generate (default: 2048)
-- `MODEL_N_CTX`: Context window size (default: 2048)
-- `MODEL_N_THREADS`: Number of CPU threads (default: auto-detect)
-- `MODEL_VERBOSE`: Enable verbose LLM output (default: false)
-
-#### RAG Configuration
-
-- `RAG_RELEVANCE_THRESHOLD`: Threshold for triggering web search (0.0-1.0, default: 0.4)
-- `RAG_ENABLE_PRF`: Enable Pseudo-Relevance Feedback for query expansion (default: true)
-- `RAG_PRF_K`: Number of top documents for PRF (default: 5)
-- `RAG_PRF_TERMS`: Number of terms to expand (default: 10)
-- `RAG_LM_RETRIEVER_WEIGHT`: Weight for LM retriever (default: 0.5)
-- `RAG_VECTOR_RETRIEVER_WEIGHT`: Weight for vector retriever (default: 0.5)
-- `RAG_RETRIEVER_K`: Number of documents to retrieve (default: 5)
-
-#### Vector DB Configuration
-
-- `VECTOR_DB_COLLECTION_NAME`: Chroma collection name (default: sri_documents_transformer)
-- `VECTOR_DB_PERSIST_DIR`: Directory for vector store persistence (default: indexes/chroma_langchain)
-- `VECTOR_DB_TOP_K`: Number of results for vector search (default: 10)
-
-#### Web Search Configuration
-
-- `WEB_SEARCH_MAX_RESULTS`: Maximum web search results (default: 5)
-- `WEB_SEARCH_REGION`: Search region (default: es-es)
-- `WEB_SEARCH_TIME`: Time filter (default: y)
-
-#### API Configuration
-
-- `API_HOST`: API server host (default: 0.0.0.0)
-- `API_PORT`: API server port (default: 8000)
-- `API_CORS_ORIGINS`: CORS allowed origins (default: *)
-
-## Running the Application
-
-### Start the API Server
+### Paso 2: Construcción de Índices
 
 ```bash
-# Using the launcher
-python api.py
-
-# Or directly
-python -m src.api.server
+make vector-index
 ```
 
-The API will be available at:
+Construye tres índices:
+- **InvertedIndex**: Índice invertivo con TF-IDF (en `indexes/index/`)
+- **LM Retriever**: Modelo de lenguaje con Dirichlet smoothing (en `indexes/lm/`)
+- **Vector Store**: Embeddings con HuggingFace Transformers (`paraphrase-multilingual-MiniLM-L12-v2`) en Chroma (en `indexes/vector_store/` y `indexes/chroma/`)
 
-- API: <http://localhost:8000>
-- Documentation: <http://localhost:8000/docs>
-- Alternative docs: <http://localhost:8000/redoc>
+### Paso 3: Consulta
 
-### API Endpoints
+**Sin generación (solo retrieval):**
+```bash
+make query
+```
 
-#### Query the RAG System
+**Con generación RAG (usa LLM local):**
+```bash
+make rag
+```
+
+### Paso 4: Tests
 
 ```bash
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{"query": "¿Qué es el procesamiento de lenguaje natural?"}'
+make test
 ```
 
-Response includes:
+---
 
-- `answer`: Generated answer
-- `sources`: Source documents
-- `search_performed`: Whether web search was used
-- `top_local_score`: Relevance score of best local result
-- `retrieved_documents`: List of retrieved documents with scores
+## Variables de Entorno
 
-## Behavior Documentation
+### Hardware
 
-### Model Handling
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `GGML_BACKEND` | `cpu` | Backend para LLM: `cpu`, `cuda`, `metal` |
 
-- **Default Model**: If `MODEL_PATH` is empty, the system uses the default TinyLlama model
-- **Auto-Download**: The default model is automatically downloaded if not present
-- **Custom Model**: If `MODEL_PATH` is provided, the model must exist or an error is raised
-- **Error**: `LLMModelNotFoundError` is raised if a custom model path is provided but the file doesn't exist
+```bash
+# Usar GPU NVIDIA
+GGML_BACKEND=cuda make up
 
-### Offline / No Internet Scenarios
+# Usar Apple Silicon
+GGML_BACKEND=metal make up
+```
 
-- **Web Search Failure**: If internet search fails (no connection, timeout, etc.), the system:
-  - Logs the error
-  - Continues with local results only
-  - Returns answer based on available local documents
-- **No Relevant Local Results**: If local documents have low relevance scores:
-  - Web search is attempted
-  - If web search fails, the system uses local results anyway
-  - The answer may indicate insufficient information
+### Chroma (Base de Datos Vectorial)
 
-### Error Handling
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `CHROMA_HOST` | `chroma` | Host del servidor Chroma |
+| `CHROMA_PORT` | `8000` | Puerto del servidor Chroma |
 
-The API has comprehensive error handling:
+### Python
 
-- `RAGError`: General RAG pipeline errors (500)
-- `IndexingError`: Document indexing errors (500)
-- `RetrievalError`: Document retrieval errors (500)
-- `VectorDBError`: Vector database errors (500)
-- `LLMError`: LLM operation errors (503)
-- `LLMModelNotFoundError`: Model not found (503)
-- `WebSearchExecutionError`: Web search failure (500)
-- `Exception`: Unexpected errors (500)
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `PYTHONUNBUFFERED` | `1` | Salida sin buffer |
+| `LOG_LEVEL` | `INFO` | Nivel de logs |
 
-## Project Structure
+### Modelo LLM
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `MODEL_PATH` | (vacío) | Ruta al modelo GGUF |
+| `MODEL_TEMPERATURE` | `0.3` | Temperatura de generación |
+| `MODEL_MAX_TOKENS` | `2048` | Máx. tokens a generar |
+| `MODEL_N_CTX` | `2048` | Tamaño de contexto |
+| `MODEL_N_THREADS` | (auto) | Hilos de CPU |
+
+### RAG
+
+| Variable | Default | Descripción |
+|----------|---------|-------------|
+| `RAG_RELEVANCE_THRESHOLD` | `0.4` | Umbral de relevancia |
+| `RAG_ENABLE_PRF` | `true` | Habilitar Pseudo-Relevance Feedback |
+| `RAG_PRF_K` | `5` | Docs para PRF |
+| `RAG_RETRIEVER_K` | `5` | Docs a recuperar |
+
+---
+
+## Todos los Comandos
+
+| Comando | Descripción |
+|---------|-------------|
+| `make help` | Mostrar ayuda |
+| `make build` | Construir imagen Docker |
+| `make up` | Iniciar API + Chroma + UI |
+| `make down` | Detener servicios |
+| `make rebuild` | Reconstruir y reiniciar |
+| `make api` | Iniciar solo API |
+| `make ui` | Iniciar solo UI |
+| `make crawl` | Ejecutar Scrapy spiders |
+| `make index` | Construir índice invertido |
+| `make vector-index` | Construir índices completos |
+| `make query` | CLI búsqueda sin RAG |
+| `make rag` | CLI búsqueda con RAG |
+| `make test` | Ejecutar tests |
+| `make logs` | Ver todos los logs |
+| `make logs-api` | Ver logs de API |
+| `make logs-chroma` | Ver logs de Chroma |
+| `make logs-crawl` | Ver logs de crawl |
+| `make ps` | Ver estado de servicios |
+| `make clean` | Limpiar contenedores y datos |
+
+---
+
+## Estructura de Archivos
 
 ```
 SRI/
+├── main.py              # CLI principal
+├── docker-compose.yml   # Orquestación
+├── Dockerfile           # Imagen Python
+├── Makefile             # Comandos
+├── .env                 # Variables de entorno
+│
+├── ui/                  # Interfaz React
+│   ├── Dockerfile
+│   └── nginx.conf
+│
 ├── src/
-│   ├── config.py              # Centralized configuration
-│   ├── api/                   # FastAPI application
-│   ├── generator/             # LLM wrapper
-│   ├── indexing/              # Document indexing
-│   ├── rag/                   # RAG pipeline
-│   ├── retrieval/             # Retrieval components
-│   ├── search_internet/       # Web search
-│   ├── utils/                 # Utilities (model downloader)
-│   └── vector_db/             # Vector database
-├── data/                      # Document storage
-├── indexes/                   # Index storage
-├── models/                    # Model files
-└── tests/                     # Tests
+│   ├── extract_data/    # Scrapy spiders
+│   ├── indexing/        # InvertedIndex, TextNormalizer
+│   ├── retrieval/       # LMRetriever, QueryProcessor
+│   ├── vector_db/       # BasicEmbeddings, VectorStore
+│   ├── generator/       # LocalLLM
+│   └── rag/             # GenerativeAnswerGenerator
+│
+├── data/                # Artículos (JSONL)
+├── indexes/             # Índices
+├── logs/                # Logs de crawl
+└── models/              # Modelos LLM
 ```
-
-## Development
-
-### Running Tests
-
-```bash
-pytest
-```
-
-### Adding Documents
-
-Documents are stored in the `data/` directory. The system automatically indexes them on startup.
-
-## License
-
-See LICENSE file.

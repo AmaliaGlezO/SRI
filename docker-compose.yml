@@ -16,6 +16,7 @@ services:
       - ./indexes:/app/indexes
     depends_on:
       - chroma
+    command: uv run python api.py
 
   crawl:
     build: .

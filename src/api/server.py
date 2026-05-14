@@ -26,33 +26,41 @@ def initialize_system(model_path):
 
     logger.info("Initializing SRI system...")
 
+    indexes_dir = Path("indexes")
+
     try:
         normalizer = TextNormalizer()
 
         def get_or_create_system(force=False):
             """Load or create the hybrid retrieval system."""
-            #  LMRetriever
-            if not force and Path("data/index/lm").exists():
+            lm_path = indexes_dir / "lm"
+            index_path = indexes_dir / "index"
+            
+            # LMRetriever
+            if not force and lm_path.exists():
                 logger.info("Loading existing LM retriever...")
-                lm = LMRetriever.load("data/index/lm")
+                lm = LMRetriever.load(lm_path)
             else:
                 logger.info("Building new LM retriever...")
-                docs = DocumentStore().load_all()
+                docs = DocumentStore("data").load_all()
                 d = docs.all()
+                if not d:
+                    logger.warning("No documents found in data/")
+                    return None, None
                 indexer = InvertedIndex(normalizer=normalizer)
                 indexer.build(d)
-                indexer.save("data/index")
+                indexer.save(index_path)
                 lm = LMRetriever.from_inverted_index(indexer)
-                lm.save("data/index/lm")
+                lm.save(lm_path)
 
-            #  Embeddings & Vector Store
+            # Embeddings & Vector Store
             logger.info("Initializing embeddings and vector store...")
             embeddings = get_embeddings()
             vector_store = VectorStore(embeddings=embeddings)
 
             if force or vector_store.stats()["num_documents"] == 0:
                 logger.info("Populating vector store...")
-                docs = DocumentStore().load_all()
+                docs = DocumentStore("data").load_all()
                 doc_ids = []
                 texts = []
                 metadatas = []

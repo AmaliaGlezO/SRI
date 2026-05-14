@@ -1,87 +1,174 @@
-# SRI - Sistema de Recuperación de Información de Noticias
+# SRI RAG System
 
-Motor de búsqueda sobre artículos tecnológicos de Xataka, centrado en móviles y PC/hardware. El sistema integra crawling, scraping, índice invertido, modelo de lenguaje probabilístico, base vectorial Chroma, recuperación híbrida, RAG extractivo, evaluación e interfaz visual.
+Spanish Information Retrieval system using RAG (Retrieval-Augmented Generation) with hybrid search (LM + Vector) and automatic web search fallback.
 
-## Componentes
+## Features
 
-```text
-src/extract_data/   Spiders Scrapy, items, pipelines y logging
-src/indexing/       DocumentStore, normalización, índice invertido y estadísticas
-src/retrieval/      QueryProcessor, LM Dirichlet, RM3 y ranking híbrido
-src/vector_db/      Embeddings TF-IDF persistentes y Chroma DB
-src/rag/            Generación extractiva con citas
-src/evaluation/     Precision, Recall, F1, MRR y NDCG
-src/ui/             Interfaz visual con http.server
-data/               Corpus JSONL por categoría
-indexes/            Índices persistidos y Chroma
-report/             Documentación, estadísticas y consultas de evaluación
-```
+- **Hybrid Retrieval**: Combines language model (LM) and vector database retrieval
+- **Automatic Web Search**: Falls back to internet search when local results are not relevant
+- **Configurable via Environment Variables**: All settings can be customized
+- **Automatic Model Download**: Downloads default model if not present
+- **Spanish Language Support**: Optimized for Spanish queries and documents
+- **REST API**: FastAPI-based API for easy integration
 
-## Ejecución con Docker
+## Installation
 
 ```bash
-docker compose build
-docker compose run --rm crawl
-docker compose run --rm vector-index
-docker compose run --rm -it query
+# Install dependencies
+uv pip install -r requirements.txt
+
+# Or using the setup script
+./setup.sh
 ```
 
-Interfaz visual:
+## Configuration
+
+The system can be configured via environment variables. Copy `.env.example` to `.env` and adjust values:
 
 ```bash
-docker compose up ui
+cp .env.example .env
 ```
 
-Abrir `http://127.0.0.1:8080`.
+### Environment Variables
 
-## Ejecución local
+#### Model Configuration
 
-Requiere `uv`.
+- `MODEL_PATH`: Path to model file (empty = use default TinyLlama, will download if missing)
+- `MODEL_TEMPERATURE`: LLM sampling temperature (default: 0.3)
+- `MODEL_MAX_TOKENS`: Maximum tokens to generate (default: 2048)
+- `MODEL_N_CTX`: Context window size (default: 2048)
+- `MODEL_N_THREADS`: Number of CPU threads (default: auto-detect)
+- `MODEL_VERBOSE`: Enable verbose LLM output (default: false)
+
+#### RAG Configuration
+
+- `RAG_RELEVANCE_THRESHOLD`: Threshold for triggering web search (0.0-1.0, default: 0.4)
+- `RAG_ENABLE_PRF`: Enable Pseudo-Relevance Feedback for query expansion (default: true)
+- `RAG_PRF_K`: Number of top documents for PRF (default: 5)
+- `RAG_PRF_TERMS`: Number of terms to expand (default: 10)
+- `RAG_LM_RETRIEVER_WEIGHT`: Weight for LM retriever (default: 0.5)
+- `RAG_VECTOR_RETRIEVER_WEIGHT`: Weight for vector retriever (default: 0.5)
+- `RAG_RETRIEVER_K`: Number of documents to retrieve (default: 5)
+
+#### Vector DB Configuration
+
+- `VECTOR_DB_COLLECTION_NAME`: Chroma collection name (default: sri_documents_transformer)
+- `VECTOR_DB_PERSIST_DIR`: Directory for vector store persistence (default: indexes/chroma_langchain)
+- `VECTOR_DB_TOP_K`: Number of results for vector search (default: 10)
+
+#### Web Search Configuration
+
+- `WEB_SEARCH_MAX_RESULTS`: Maximum web search results (default: 5)
+- `WEB_SEARCH_REGION`: Search region (default: es-es)
+- `WEB_SEARCH_TIME`: Time filter (default: y)
+
+#### API Configuration
+
+- `API_HOST`: API server host (default: 0.0.0.0)
+- `API_PORT`: API server port (default: 8000)
+- `API_CORS_ORIGINS`: CORS allowed origins (default: *)
+
+## Running the Application
+
+### Start the API Server
 
 ```bash
-uv run python main.py --build
-uv run python main.py --query --rag --top-k 5
-uv run python main.py --serve --host 127.0.0.1 --port 8080
+# Using the launcher
+python api.py
+
+# Or directly
+python -m src.api.server
 ```
 
-## Pipeline
+The API will be available at:
 
-`main.py --build` ejecuta el flujo completo:
+- API: <http://localhost:8000>
+- Documentation: <http://localhost:8000/docs>
+- Alternative docs: <http://localhost:8000/redoc>
 
-1. Carga documentos JSONL desde `data/`.
-2. Construye y guarda el índice invertido en `indexes/index/`.
-3. Entrena y guarda el modelo LM Dirichlet en `indexes/lm/`.
-4. Entrena embeddings TF-IDF y los guarda en `indexes/vector_store/`.
-5. Puebla Chroma DB con vectores y metadatos.
-6. Genera estadísticas en `report/corpus_stats.json`.
+### API Endpoints
 
-## Modelo de recuperación
-
-El ranking principal usa Query Likelihood con suavizado de Dirichlet (`μ=2000`). Encima se aplica RM3 para expansión por pseudo-relevance feedback. El ranking final combina:
-
-- LM: 0.70.
-- Similitud vectorial Chroma: 0.25.
-- Frescura: 0.05.
-
-## Consultas
-
-La consola y la UI aceptan lenguaje natural. También se admiten filtros simples:
-
-```text
-category:mobile samsung bateria
-source:xataka_pc teclado mecanico
-```
-
-## Evaluación
+#### Query the RAG System
 
 ```bash
-uv run python main.py --eval --top-k 10
+curl -X POST "http://localhost:8000/query" \
+  -H "Content-Type: application/json" \
+  -d '{"query": "¿Qué es el procesamiento de lenguaje natural?"}'
 ```
 
-Las consultas iniciales y relevancias están en `report/evaluation_queries.json`.
+Response includes:
 
-## Documentación
+- `answer`: Generated answer
+- `sources`: Source documents
+- `search_performed`: Whether web search was used
+- `top_local_score`: Relevance score of best local result
+- `retrieved_documents`: List of retrieved documents with scores
 
-- `report/documentacion_tecnica.md`
-- `report/estado_cortes.md`
-- `report/manual_usuario.md`
+## Behavior Documentation
+
+### Model Handling
+
+- **Default Model**: If `MODEL_PATH` is empty, the system uses the default TinyLlama model
+- **Auto-Download**: The default model is automatically downloaded if not present
+- **Custom Model**: If `MODEL_PATH` is provided, the model must exist or an error is raised
+- **Error**: `LLMModelNotFoundError` is raised if a custom model path is provided but the file doesn't exist
+
+### Offline / No Internet Scenarios
+
+- **Web Search Failure**: If internet search fails (no connection, timeout, etc.), the system:
+  - Logs the error
+  - Continues with local results only
+  - Returns answer based on available local documents
+- **No Relevant Local Results**: If local documents have low relevance scores:
+  - Web search is attempted
+  - If web search fails, the system uses local results anyway
+  - The answer may indicate insufficient information
+
+### Error Handling
+
+The API has comprehensive error handling:
+
+- `RAGError`: General RAG pipeline errors (500)
+- `IndexingError`: Document indexing errors (500)
+- `RetrievalError`: Document retrieval errors (500)
+- `VectorDBError`: Vector database errors (500)
+- `LLMError`: LLM operation errors (503)
+- `LLMModelNotFoundError`: Model not found (503)
+- `WebSearchExecutionError`: Web search failure (500)
+- `Exception`: Unexpected errors (500)
+
+## Project Structure
+
+```
+SRI/
+├── src/
+│   ├── config.py              # Centralized configuration
+│   ├── api/                   # FastAPI application
+│   ├── generator/             # LLM wrapper
+│   ├── indexing/              # Document indexing
+│   ├── rag/                   # RAG pipeline
+│   ├── retrieval/             # Retrieval components
+│   ├── search_internet/       # Web search
+│   ├── utils/                 # Utilities (model downloader)
+│   └── vector_db/             # Vector database
+├── data/                      # Document storage
+├── indexes/                   # Index storage
+├── models/                    # Model files
+└── tests/                     # Tests
+```
+
+## Development
+
+### Running Tests
+
+```bash
+pytest
+```
+
+### Adding Documents
+
+Documents are stored in the `data/` directory. The system automatically indexes them on startup.
+
+## License
+
+See LICENSE file.

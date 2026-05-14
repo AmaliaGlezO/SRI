@@ -1,10 +1,18 @@
 from pathlib import Path
 
+from src.config import (
+    MODEL_MAX_TOKENS,
+    MODEL_N_CTX,
+    MODEL_N_THREADS,
+    MODEL_TEMPERATURE,
+    MODELS_DIR,
+)
 from src.errors.llm_errors import (
     LLMDependencyError,
     LLMGenerationError,
     LLMModelNotFoundError,
 )
+from src.utils.model_downloader import ModelDownloader
 
 try:
     from llama_cpp import Llama
@@ -37,26 +45,25 @@ class LocalLLM:
         self,
         model_path: str | Path | None = None,
         n_threads: int | None = None,
-        n_ctx: int = 2048,
+        n_ctx: int | None = None,
         verbose: bool = False,
     ):
         if self._initialized:
             return
 
-        self.model_path = Path(model_path) if model_path else self._default_model_path()
-        if not self.model_path.is_file():
-            raise LLMModelNotFoundError(
-                f"Model file not found: {self.model_path}\n"
-                "Run: uv run python download_model.py --model tinyllama"
-            )
+        # Ensure model exists (download default if needed)
+        self.model_path = ModelDownloader.ensure_model_exists(
+            model_path=str(model_path) if model_path else None
+        )
 
         if n_threads is None:
-            import os
-
-            n_threads = os.cpu_count() or 4
+            n_threads = MODEL_N_THREADS
+            if n_threads is None:
+                import os
+                n_threads = os.cpu_count() or 4
 
         self.n_threads = n_threads
-        self.n_ctx = n_ctx
+        self.n_ctx = n_ctx if n_ctx is not None else MODEL_N_CTX
 
         print(f"[LocalLLM] Loading model: {self.model_path.name}")
         print(f"[LocalLLM] Threads: {n_threads}, Context: {n_ctx}")
@@ -69,30 +76,12 @@ class LocalLLM:
         )
         self._initialized = True
 
-    def _default_model_path(self) -> Path:
-        """Find default model in models/ directory."""
-        default_dir = Path("models")
-        if not default_dir.is_dir():
-            raise LLMModelNotFoundError(
-                "Models directory not found. "
-                "Run: uv run python download_model.py --model tinyllama"
-            )
-
-        for ext in [".gguf", ".bin"]:
-            for candidate in default_dir.iterdir():
-                if candidate.suffix.lower() == ext:
-                    return candidate
-
-        raise LLMModelNotFoundError(
-            "No .gguf or .bin model file found in 'models/' folder. "
-            "Run: uv run python download_model.py --model tinyllama"
-        )
 
     def generate(
         self,
         prompt: str,
-        max_tokens: int = 96,
-        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        temperature: float | None = None,
         stop: list[str] | None = None,
     ) -> str:
         """Generate text from prompt.
@@ -102,9 +91,9 @@ class LocalLLM:
         prompt: str
             The input prompt.
         max_tokens: int, optional
-            Maximum tokens to generate (default: 128).
+            Maximum tokens to generate (default: from config).
         temperature: float, optional
-            Sampling temperature (default: 0.7).
+            Sampling temperature (default: from config).
         stop: list[str], optional
             Stop sequences to end generation.
 
@@ -116,8 +105,8 @@ class LocalLLM:
         try:
             output = self._llm(
                 prompt,
-                max_tokens=max_tokens,
-                temperature=temperature,
+                max_tokens=max_tokens if max_tokens is not None else MODEL_MAX_TOKENS,
+                temperature=temperature if temperature is not None else MODEL_TEMPERATURE,
                 stop=stop or [],
                 echo=False,
             )

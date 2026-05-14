@@ -12,7 +12,7 @@ from src.errors.rag_errors import RAGError
 from src.errors.indexing_errors import IndexingError
 from src.errors.retrieval_errors import RetrievalError
 from src.errors.vector_db_errors import VectorDBError
-from src.errors.llm_errors import LLMError
+from src.errors.llm_errors import LLMError, LLMModelNotFoundError
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
+@app.exception_handler(ErrorResponse)
+async def response_error_handler(request:Request,exc:ErrorResponse):
+    """Handle ErrorResponse"""
+    logger.error(f"Error Response: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={
+            'error_type':exc.__class__.__name__,
+            "message":str(exc),
+        }
+    )
 
 @app.exception_handler(RAGError)
 async def rag_error_handler(request: Request, exc: RAGError):
@@ -112,6 +122,19 @@ async def vector_db_error_handler(request: Request, exc: VectorDBError):
     logger.error(f"Vector DB Error: {exc}")
     return JSONResponse(
         status_code=500,
+        content={
+            "error_type": exc.__class__.__name__,
+            "message": str(exc),
+        },
+    )
+
+
+@app.exception_handler(LLMModelNotFoundError)
+async def llm_model_not_found_handler(request: Request, exc: LLMModelNotFoundError):
+    """Handle LLM model not found errors."""
+    logger.error(f"LLM Model Not Found: {exc}")
+    return JSONResponse(
+        status_code=503,
         content={
             "error_type": exc.__class__.__name__,
             "message": str(exc),

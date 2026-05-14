@@ -5,6 +5,8 @@ import logging
 import sys
 from pathlib import Path
 
+from src.config import API_HOST, API_PORT, MODEL_PATH
+
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
@@ -13,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def initialize_system():
+def initialize_system(model_path):
     """Initialize the SRI system components."""
     from src.indexing.indexer import TextNormalizer, InvertedIndex
     from src.indexing.storage import DocumentStore
@@ -73,7 +75,7 @@ def initialize_system():
         rag = RAGPipeline(
             retriever_lm=lm_retriever,
             vector_store=vector_store,
-            model_path="models/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
+            model_path=model_path,
         )
 
         logger.info("✓ SRI system initialized successfully")
@@ -113,11 +115,11 @@ def create_status_checker(lm_retriever, vector_store):
     return check_status
 
 
-def main():
+def main(model_path):
     """Main entry point."""
     try:
         # Initialize system
-        rag, get_or_create_system, lm_retriever, vector_store = initialize_system()
+        rag, get_or_create_system, lm_retriever, vector_store = initialize_system(model_path)
 
         # Initialize API
         from src.api.app import app, init_api
@@ -134,8 +136,8 @@ def main():
 
         uvicorn.run(
             app,
-            host="0.0.0.0",
-            port=8000,
+            host=API_HOST,
+            port=API_PORT,
             log_level="info",
         )
 
@@ -145,4 +147,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(model_path=MODEL_PATH)

@@ -8,6 +8,7 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.embeddings import Embeddings
 import numpy as np
 
+from src.config import VECTOR_DB_COLLECTION_NAME, VECTOR_DB_PERSIST_DIR, VECTOR_DB_TOP_K
 from src.errors.vector_db_errors import VectorStoreOperationError
 
 if TYPE_CHECKING:
@@ -19,11 +20,11 @@ class VectorStore:
     Vector database using Chroma DB via LangChain.
     """
 
-    COLLECTION_NAME = "sri_documents_transformer"
+    COLLECTION_NAME = VECTOR_DB_COLLECTION_NAME
 
     def __init__(self, embeddings: Embeddings) -> None:
         self._embeddings = embeddings
-        self._persist_dir = str(Path("indexes/chroma_langchain").absolute())
+        self._persist_dir = VECTOR_DB_PERSIST_DIR
 
         self._vectorstore = Chroma(
             collection_name=self.COLLECTION_NAME,
@@ -80,10 +81,12 @@ class VectorStore:
         except Exception as exc:
             raise VectorStoreOperationError("Failed to add documents.") from exc
 
-    def search(self, query: str, top_k: int = 10) -> list[dict]:
+    def search(self, query: str, top_k: int | None = None) -> list[dict]:
         """
         Rank documents by similarity.
         """
+        if top_k is None:
+            top_k = VECTOR_DB_TOP_K
         try:
             results = self._vectorstore.similarity_search_with_relevance_scores(
                 query,

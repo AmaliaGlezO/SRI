@@ -6,6 +6,19 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.llms import LlamaCpp
 
+from src.config import (
+    MODEL_MAX_TOKENS,
+    MODEL_N_CTX,
+    MODEL_TEMPERATURE,
+    MODEL_VERBOSE,
+    RAG_ENABLE_PRF,
+    RAG_LM_RETRIEVER_WEIGHT,
+    RAG_PRF_K,
+    RAG_PRF_TERMS,
+    RAG_RELEVANCE_THRESHOLD,
+    RAG_RETRIEVER_K,
+    RAG_VECTOR_RETRIEVER_WEIGHT,
+)
 from src.errors.internet_search_error import WebSearchExecutionError
 from src.errors.rag_errors import (
     RAGAnswerGenerationError,
@@ -62,26 +75,32 @@ class RAGPipeline:
         self,
         retriever_lm: LMRetriever,
         vector_store: VectorStore,
-        model_path: str = "models/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
-        relevance_threshold: float = 0.4,
-        enable_prf: bool = True,
-        prf_k: int = 5,
-        prf_terms: int = 10,
+        model_path: str | None = None,
+        relevance_threshold: float | None = None,
+        enable_prf: bool | None = None,
+        prf_k: int | None = None,
+        prf_terms: int | None = None,
     ) -> None:
         try:
             # Initialize LLM
             self.vector_store = vector_store
-            self.relevance_threshold = relevance_threshold
+            self.relevance_threshold = relevance_threshold if relevance_threshold is not None else RAG_RELEVANCE_THRESHOLD
             self.web_searcher = WebSearcher()
-            self.enable_prf = enable_prf
-            self.prf_k = prf_k
-            self.prf_terms = prf_terms
+            self.enable_prf = enable_prf if enable_prf is not None else RAG_ENABLE_PRF
+            self.prf_k = prf_k if prf_k is not None else RAG_PRF_K
+            self.prf_terms = prf_terms if prf_terms is not None else RAG_PRF_TERMS
+            
+            # Use default model path if not provided
+            if model_path is None:
+                from src.utils.model_downloader import ModelDownloader
+                model_path = str(ModelDownloader.ensure_model_exists())
+            
             self.llm = LlamaCpp(
                 model_path=model_path,
-                temperature=0.3,
-                max_tokens=2048,
-                n_ctx=2048,
-                verbose=False,
+                temperature=MODEL_TEMPERATURE,
+                max_tokens=MODEL_MAX_TOKENS,
+                n_ctx=MODEL_N_CTX,
+                verbose=MODEL_VERBOSE,
             )
 
             # Initialize Query Processor for advanced query handling
@@ -89,15 +108,15 @@ class RAGPipeline:
             self.raw_lm_retriever = retriever_lm
 
             #  Initialize Retrievers
-            self.lm_retriever = LangChainLMRetriever(retriever=retriever_lm, k=5)
+            self.lm_retriever = LangChainLMRetriever(retriever=retriever_lm, k=RAG_RETRIEVER_K)
             self.vector_retriever = LangChainVectorRetriever(
-                vectorstore=vector_store._vectorstore, k=5
+                vectorstore=vector_store._vectorstore, k=RAG_RETRIEVER_K
             )
 
             # Create Ensemble Retriever (Hybrid Search)
             self.ensemble_retriever = EnsembleRetriever(
                 retrievers=[self.lm_retriever, self.vector_retriever],
-                weights=[0.5, 0.5],
+                weights=[RAG_LM_RETRIEVER_WEIGHT, RAG_VECTOR_RETRIEVER_WEIGHT],
             )
 
             # Define Prompt
@@ -182,7 +201,7 @@ Respuesta:"""
         try:
             lm_results = self.raw_lm_retriever.retrieve(
                 q_weights,
-                top_k=5,
+                top_k=RAG_RETRIEVER_K,
                 filters=processed_query.filters if processed_query.filters else None,
             )
             print(f"[RAGPipeline] Retrieved {len(lm_results)} docs from LM retriever")

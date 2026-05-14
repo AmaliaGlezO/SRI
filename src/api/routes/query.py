@@ -1,7 +1,6 @@
 """Query endpoints for the RAG API."""
 
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional
 
 from src.api.models import QueryRequest, QueryResponse, ErrorResponse
 from src.errors.rag_errors import (
@@ -75,6 +74,11 @@ async def query(request: QueryRequest) -> QueryResponse:
         raise HTTPException(
             status_code=500,
             detail=f"RAG error: {exc}",
+        )
+    except WebSearchExecutionError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f'no internet: {exc}'
         )
     except Exception as exc:
         raise HTTPException(

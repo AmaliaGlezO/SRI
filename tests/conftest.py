@@ -23,8 +23,7 @@ def setup_test_environment():
         dir_path.mkdir(parents=True, exist_ok=True)
     
     yield
-    
-    # Cleanup can be added here if needed
+
 
 
 @pytest.fixture(scope="function")
@@ -36,7 +35,7 @@ def temp_data_dir(tmp_path):
 @pytest.fixture(scope="function")
 def test_query():
     """Provide a test query."""
-    return "¿Qué es inteligencia artificial?"
+    return "¿Que modelos de moviles hay de samsung en 2026? pensará en sacar algunos nuevos en 2027?"
 
 
 @pytest.fixture(scope="function")

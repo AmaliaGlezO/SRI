@@ -106,7 +106,10 @@ class DocumentStore:
             "os": raw.get("os"),
             "device_name": raw.get("device_name"),
             "article_type": raw.get("article_type"),
-            # "metadata": raw.get("metadata") or {},
+            "specs": raw.get("specs") or {},
+            "price": raw.get("price"),
+            "release_date": raw.get("release_date"),
+            "metadata": raw.get("metadata") or {},
         }
 
     def get_by_id(self, doc_id: str) -> dict | None:

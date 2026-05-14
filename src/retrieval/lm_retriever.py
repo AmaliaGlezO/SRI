@@ -81,6 +81,7 @@ class LMRetriever:
         query: str | dict[str, float],
         top_k: int = 10,
         category_filter: str | None = None,
+        filters: dict[str, str] | None = None,
     ) -> list[dict]:
         """
         Search and rank documents using Query Likelihood with Dirichlet Smoothing.
@@ -108,7 +109,11 @@ class LMRetriever:
                 return []
 
         #  Retrieval Pass
-        doc_scores = self._score_documents(q_weights, category_filter)
+        metadata_filters = dict(filters or {})
+        if category_filter:
+            metadata_filters["category"] = category_filter
+
+        doc_scores = self._score_documents(q_weights, metadata_filters)
 
         # Rank documents by highest score
         ranked_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
@@ -126,7 +131,7 @@ class LMRetriever:
         return results
 
     def _score_documents(
-        self, q_weights: dict[str, float], category_filter: str | None
+        self, q_weights: dict[str, float], metadata_filters: dict[str, str] | None
     ) -> dict[str, float]:
         """Core scoring function (KL-divergence between query model and doc models)."""
         doc_scores: dict[str, float] = {}
@@ -136,12 +141,12 @@ class LMRetriever:
             if q in self.index._index:
                 candidate_docs.update(self.index._index[q].keys())
 
-        # Filter by category if requested
-        if category_filter:
+        # Filter by explicit query metadata filters if requested.
+        if metadata_filters:
             candidate_docs = {
                 d
                 for d in candidate_docs
-                if self.index._doc_info[d].get("category") == category_filter
+                if self._matches_filters(self.index._doc_info[d], metadata_filters)
             }
 
         for doc_id in candidate_docs:
@@ -164,6 +169,24 @@ class LMRetriever:
             doc_scores[doc_id] = score
 
         return doc_scores
+
+    @staticmethod
+    def _matches_filters(doc_info: dict, filters: dict[str, str]) -> bool:
+        """Return True when a document satisfies every query metadata filter."""
+        for key, expected in filters.items():
+            actual = doc_info.get(key)
+            expected_norm = str(expected).strip().lower()
+
+            if isinstance(actual, list):
+                actual_values = [str(item).strip().lower() for item in actual]
+                if expected_norm not in actual_values:
+                    return False
+            else:
+                actual_norm = str(actual or "").strip().lower()
+                if actual_norm != expected_norm:
+                    return False
+
+        return True
 
     def save(self, directory: str | Path) -> None:
         """Persist the retriever state and its components."""

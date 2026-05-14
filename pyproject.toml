@@ -11,8 +11,24 @@ dependencies = [
     "pandas==3.0.1",
     "nltk==3.9",
     "scikit-learn==1.6",
-    "langchain==1.2.10",
-    "langchain-huggingface>=1.2.1",
     "chromadb",
     "onnxruntime<1.19.0",
+    "llama-cpp-python>=0.3.0",
+    "tqdm>=4.67.3",
+    "langchain>=1.2.10",
+    "langchain-huggingface>=1.2.1",
+    "langchain-community",
+    "sentence-transformers",
+    "emoji>=2.15.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.21.0",
+]
+
+[tool.uv]
+required-environments = [
+    "sys_platform == 'darwin' and platform_machine == 'x86_64'",
 ]

@@ -1,25 +1,20 @@
 from __future__ import annotations
 
 import pickle
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 from langchain_core.embeddings import Embeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from sklearn.feature_extraction.text import TfidfVectorizer
 
 from src.indexing.indexer import InvertedIndex, TextNormalizer
 
 
-class BasicEmbeddings(Embeddings):
+class TfidfEmbeddings(Embeddings):
     """
     LangChain embedding model using basic TF-IDF vectors.
-
-    Parameters
-    ----------
-    normalizer : TextNormalizer | None
-        Shared text normaliser.
-    max_features : int
-        Maximum vocabulary size.
     """
 
     def __init__(
@@ -38,7 +33,7 @@ class BasicEmbeddings(Embeddings):
         )
         self._fitted = False
 
-    def fit(self, documents: list[dict]) -> "BasicEmbeddings":
+    def fit(self, documents: list[dict]) -> "TfidfEmbeddings":
         """Fit the TF-IDF model from a list of document dicts."""
         if not documents:
             raise ValueError("Empty document list.")
@@ -52,64 +47,45 @@ class BasicEmbeddings(Embeddings):
         self._fitted = True
 
         v = len(self._vectorizer.vocabulary_)
-        print(f"[BasicEmbeddings] TF-IDF Fitted: {len(documents)} docs | {v} terms")
+        print(f"[TfidfEmbeddings] TF-IDF Fitted: {len(documents)} docs | {v} terms")
         return self
 
-    def fit_from_index(self, index: "InvertedIndex") -> np.ndarray:
-        """
-        Build basic TF-IDF embeddings from the raw document texts.
-        """
-        doc_ids = list(index._doc_info.keys())
-        doc_texts = []
-
-        for doc_id in doc_ids:
-            # Reconstruct bag of words as a string
-            words = []
-            for term, postings in index._index.items():
-                if doc_id in postings:
-                    words.extend([term] * postings[doc_id])
-            doc_texts.append(" ".join(words))
-
-        self._vectorizer.fit(doc_texts)
-        self._fitted = True
-
-        v = len(self._vectorizer.vocabulary_)
-        print(
-            f"[BasicEmbeddings] TF-IDF Reconstructed Fitted: {len(doc_ids)} docs | {v} terms"
-        )
-
-        return self._vectorizer.transform(doc_texts).toarray().astype(np.float32)
-
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        """Embed document texts into TF-IDF vectors."""
         if not self._fitted:
             raise RuntimeError("Not fitted.")
-
         matrix = self._vectorizer.transform(texts)
-        # Convert sparse to dense list of lists
         return matrix.toarray().astype(np.float32).tolist()
 
     def embed_query(self, text: str) -> list[float]:
-        """Embed a single query into a TF-IDF vector."""
         if not self._fitted:
             raise RuntimeError("Not fitted.")
-
         vector = self._vectorizer.transform([text])
         return vector.toarray().astype(np.float32).flatten().tolist()
 
-    def __getstate__(self) -> dict[str, Any]:
-        """Custom pickling to handle the vectorizer cleanly."""
-        state = self.__dict__.copy()
-        return state
+    def save(self, directory: str | Path) -> None:
+        path = Path(directory)
+        path.mkdir(parents=True, exist_ok=True)
+        with open(path / "tfidf_embeddings.pkl", "wb") as fh:
+            pickle.dump(self, fh, protocol=pickle.HIGHEST_PROTOCOL)
 
-    def __setstate__(self, state: dict[str, Any]) -> None:
-        """Custom unpickling."""
-        self.__dict__.update(state)
+    @classmethod
+    def load(cls, directory: str | Path) -> "TfidfEmbeddings":
+        path = Path(directory) / "tfidf_embeddings.pkl"
+        if not path.exists():
+            raise FileNotFoundError(f"Missing embeddings model at {path}")
+        with open(path, "rb") as fh:
+            return pickle.load(fh)
 
-    def __repr__(self) -> str:
-        vocab_size = (
-            len(self._vectorizer.vocabulary_)
-            if hasattr(self._vectorizer, "vocabulary_")
-            else 0
-        )
-        return f"BasicEmbeddings(max_features={self.max_features}, vocab_size={vocab_size})"
+
+def get_embeddings(
+    model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+) -> Embeddings:
+    """
+    Factory function to get the improved embedding model.
+    """
+    print(f"[Embeddings] Loading Transformer model: {model_name}...")
+    return HuggingFaceEmbeddings(
+        model_name=model_name,
+        model_kwargs={"device": "cpu"},
+        encode_kwargs={"normalize_embeddings": True},
+    )

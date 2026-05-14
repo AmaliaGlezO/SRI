@@ -1,108 +1,70 @@
-import sys
-import argparse
-from pathlib import Path
-from src.indexing.indexer import InvertedIndex
+from src.indexing.indexer import TextNormalizer, InvertedIndex
+from src.indexing.storage import DocumentStore
 from src.retrieval.lm_retriever import LMRetriever
 from src.retrieval.query_processor import QueryProcessor
+import os
+import numpy as np
+from src.rag.rag import RAGPipeline
+from src.vector_db.embeddings import get_embeddings
+from src.vector_db.vector_store import VectorStore
 
 
-def build_vector_index():
-    print(f"\n[VectorIndexer] Building Vector Store (LM)...")
+def get_or_create_system(normaliser, force=False):
+    """Load or create the hybrid retrieval system."""
+    #  LMRetriever 
+    if not force and os.path.exists("data/index/lm"):
+        lm = LMRetriever.load("data/index/lm")
+    else:
+        docs = DocumentStore().load_all()
+        d = docs.all()
+        indexer = InvertedIndex(normalizer=normaliser)
+        indexer.build(d)
+        indexer.save("data/index")
+        lm = LMRetriever.from_inverted_index(indexer)
+        lm.save("data/index/lm")
 
-    index_path = Path("indexes/index")
-    if not index_path.exists():
-        print(
-            f"[VectorIndexer] Error: Inverted index not found at {index_path}. Build it first."
-        )
-        sys.exit(1)
+    #  Embeddings & Vector Store 
+    embeddings = get_embeddings()
+    vector_store = VectorStore(embeddings=embeddings)
 
-    print(f"[VectorIndexer] Loading inverted index from {index_path}...")
-    try:
-        idx = InvertedIndex.load(index_path)
-    except Exception as e:
-        print(f"[VectorIndexer] Error loading index: {e}")
-        sys.exit(1)
+    if force or vector_store.stats()["num_documents"] == 0:
+        docs = DocumentStore().load_all()
+        doc_ids = []
+        texts = []
+        metadatas = []
+        for doc in docs:
+            doc_id = str(doc.get("id") or doc.get("url", ""))
+            doc_ids.append(doc_id)
+            texts.append(f"{doc.get('title', '')} {doc.get('content', '')}")
+            metadatas.append(doc)
 
-    print(f"[VectorIndexer] Index loaded: {idx}")
+        vector_store.setup(doc_ids, texts, metadatas, reset=True)
 
-    n_docs = idx.stats()["num_documents"]
-    if n_docs < 2:
-        print(f"[VectorIndexer] Error: Not enough documents ({n_docs}) to build LM.")
-        sys.exit(1)
-
-    print(f"[VectorIndexer] Fitting Language Model (Query Likelihood with Dirichlet Prior)...")
-    lm = LMRetriever.from_inverted_index(idx)
-
-    output_path = Path("indexes/lm")
-    lm.save(output_path)
-
-    print(f"[VectorIndexer] Vector Store built and saved to {output_path}.\n")
-
-
-def run_query_interface():
-    print(f"\n[Search] Starting interactive search interface...")
-
-    lm_path = Path("indexes/lm")
-    if not (lm_path / "lm_model.pkl").exists():
-        print(f"[Search] Error: Vector Store not found at {lm_path}. Run build first.")
-        return
-
-    lm = LMRetriever.load(lm_path)
-    qp = QueryProcessor()
-
-    print(f"[Search] Model loaded. Type 'exit' to quit.\n")
-
-    while True:
-        try:
-            query = input("Query> ").strip()
-            if not query:
-                continue
-            if query.lower() in ("exit", "quit"):
-                break
-
-            # Process query
-            pq = qp.process(query)
-            
-            # Apply Pseudo-Relevance Feedback via QueryProcessor
-            q_weights = pq.to_weights()
-            expanded_weights = qp.apply_prf(q_weights, lm)
-
-            # Retrieve
-            results = lm.retrieve(expanded_weights, top_k=5)
-
-            print(f"\nResults for: '{pq.text}'")
-            if not results:
-                print("No relevant documents found.")
-            else:
-                for r in results:
-                    print(f"  [{r['score']:.4f}] {r['title']} ({r['date'][:10]})")
-                    print(f"    URL: {r['url']}")
-            print("-" * 40)
-
-        except KeyboardInterrupt:
-            break
-        except Exception as e:
-            print(f"Error: {e}")
+    return lm, vector_store
 
 
 def main():
-    parser = argparse.ArgumentParser(description="SRI Vector DB and Search Interface")
-    parser.add_argument("--build", action="store_true", help="Build the vector store")
-    parser.add_argument(
-        "--query", action="store_true", help="Start the search interface"
+    normalizer = TextNormalizer()
+
+    # Initialize both retrieval systems
+    lm_retriever, vector_store = get_or_create_system(normalizer, force=True)
+
+    # Initialize LangChain RAG Pipeline
+    rag = RAGPipeline(
+        retriever_lm=lm_retriever,
+        vector_store=vector_store,
+        model_path="models/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
     )
 
-    args = parser.parse_args()
+    query = "dame una lista de Modelos de celulares de la marca samsung 2026"
 
-    if args.build:
-        build_vector_index()
-    elif args.query:
-        run_query_interface()
-    else:
-        if (Path("indexes/lm") / "lm_model.pkl").exists():
-            run_query_interface()
-        else:
-            build_vector_index()
+    res = rag.answer(query=query)
+
+    print("\n--- RESPUESTA GENERADA ---")
+    print(res["answer"])
+    print("\n--- FUENTES ---")
+    for src in res["sources"]:
+        print(f"- {src['title']} ({src['url']})")
 
 
 if __name__ == "__main__":

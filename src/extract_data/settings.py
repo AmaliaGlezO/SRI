@@ -23,6 +23,10 @@ ROBOTSTXT_OBEY = True
 # Hard timeout per spider (seconds). Prevents runaway crawls.
 CLOSESPIDER_TIMEOUT = 3600  # 1 hour
 
+# Explicit crawl depth policy for the project deliverable. Listing pages are
+# followed into articles and limited pagination without allowing open-ended crawl.
+DEPTH_LIMIT = 3
+
 # maximum concurrent requests
 CONCURRENT_REQUESTS = 8
 CONCURRENT_REQUESTS_PER_DOMAIN = 4
@@ -75,4 +79,3 @@ EXTENSIONS = {
 }
 
 SPIDER_FILE_LOGGING = True
-

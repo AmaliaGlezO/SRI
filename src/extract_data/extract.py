@@ -147,64 +147,78 @@ class Extract(scrapy.Spider, ABC):
         return item
 
     def _detect_brand(self, text):
-        """Detect mobile brand from text. Shared across all mobile spiders."""
+        """Detect product brand using token boundaries to avoid substring noise."""
         text = text.lower()
         brands = {
-            "rog phone": "ASUS",
-            "galaxy": "Samsung",
-            "samsung": "Samsung",
-            "iphone": "Apple",
-            "ipad": "Apple",
-            "apple": "Apple",
-            "redmi": "Xiaomi",
-            "poco": "Xiaomi",
-            "xiaomi": "Xiaomi",
-            "oneplus": "OnePlus",
-            "oppo": "Oppo",
-            "vivo": "vivo",
-            "honor": "Honor",
-            "huawei": "Huawei",
-            "moto ": "Motorola",
-            "motorola": "Motorola",
-            "google pixel": "Google",
-            "pixel": "Google",
-            "nothing phone": "Nothing",
-            "nothing": "Nothing",
-            "realme": "Realme",
-            "xperia": "Sony",
-            "sony": "Sony",
-            "asus": "ASUS",
-            "nokia": "Nokia",
-            "zte": "ZTE",
-            "nubia": "Nubia",
-            "lenovo": "Lenovo",
-            "tecno": "Tecno",
-            "infinix": "Infinix",
-            "fairphone": "Fairphone",
+            r"\brog\s+phone\b": "ASUS",
+            r"\bgalaxy\b": "Samsung",
+            r"\bsamsung\b": "Samsung",
+            r"\biphone\b": "Apple",
+            r"\bipad\b": "Apple",
+            r"\bapple\b": "Apple",
+            r"\bredmi\b": "Xiaomi",
+            r"\bpoco\b": "Xiaomi",
+            r"\bxiaomi\b": "Xiaomi",
+            r"\boneplus\b": "OnePlus",
+            r"\boppo\b": "Oppo",
+            r"\bvivo\b": "vivo",
+            r"\bhonor\b": "Honor",
+            r"\bhuawei\b": "Huawei",
+            r"\bmoto\b": "Motorola",
+            r"\bmotorola\b": "Motorola",
+            r"\bgoogle\s+pixel\b": "Google",
+            r"\bpixel\b": "Google",
+            r"\bnothing\s+phone\b": "Nothing",
+            r"\bnothing\b": "Nothing",
+            r"\brealme\b": "Realme",
+            r"\bxperia\b": "Sony",
+            r"\bsony\b": "Sony",
+            r"\basus\b": "ASUS",
+            r"\bnokia\b": "Nokia",
+            r"\bzte\b": "ZTE",
+            r"\bnubia\b": "Nubia",
+            r"\blenovo\b": "Lenovo",
+            r"\btecno\b": "Tecno",
+            r"\binfinix\b": "Infinix",
+            r"\bfairphone\b": "Fairphone",
+            r"\blg\b": "LG",
+            r"\bdell\b": "Dell",
+            r"\bhp\b": "HP",
+            r"\bmsi\b": "MSI",
+            r"\bacer\b": "Acer",
+            r"\bintel\b": "Intel",
+            r"\bamd\b": "AMD",
+            r"\bnvidia\b": "NVIDIA",
         }
-        for keyword, brand in brands.items():
-            if keyword in text:
+        for pattern, brand in brands.items():
+            if re.search(pattern, text):
                 return brand
         return None
 
     def _detect_os(self, text):
-        """Detect mobile operating system from text. Shared across all mobile spiders."""
+        """Detect operating system using token boundaries."""
         text = text.lower()
         os_map = {
-            "watchos": "watchOS",
-            "ipados": "iPadOS",
-            "ipad": "iPadOS",
-            "harmonyos": "HarmonyOS",
-            "one ui": "Android",
-            "miui": "Android",
-            "hyperos": "Android",
-            "coloros": "Android",
-            "oxygenos": "Android",
-            "android": "Android",
-            "ios": "iOS",
+            r"\bwindows\s+11\b": "Windows",
+            r"\bwindows\s+10\b": "Windows",
+            r"\bwindows\b": "Windows",
+            r"\bmacos\b": "macOS",
+            r"\bmac\s+os\b": "macOS",
+            r"\blinux\b": "Linux",
+            r"\bwatchos\b": "watchOS",
+            r"\bipados\b": "iPadOS",
+            r"\bipad\b": "iPadOS",
+            r"\bharmonyos\b": "HarmonyOS",
+            r"\bone\s+ui\b": "Android",
+            r"\bmiui\b": "Android",
+            r"\bhyperos\b": "Android",
+            r"\bcoloros\b": "Android",
+            r"\boxygenos\b": "Android",
+            r"\bandroid\b": "Android",
+            r"\bios\b": "iOS",
         }
-        for keyword, os_name in os_map.items():
-            if keyword in text:
+        for pattern, os_name in os_map.items():
+            if re.search(pattern, text):
                 return os_name
         return None
 

@@ -1,157 +1,115 @@
 from __future__ import annotations
 
-import os
+import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
-import chromadb
-from chromadb.config import Settings
+from langchain_community.vectorstores import Chroma
+from langchain_core.embeddings import Embeddings
 import numpy as np
 
 if TYPE_CHECKING:
-    from src.vector_db.embeddings import BasicEmbeddings
+    from src.vector_db.embeddings import TfidfEmbeddings
 
 
 class VectorStore:
     """
-    Vector database using Chroma DB for storage and retrieval.
-
-    Parameters
-    ----------
-    embeddings : BasicEmbeddings | None
-        An optional embedding model used for query transformation during search.
+    Vector database using Chroma DB via LangChain.
     """
 
-    COLLECTION_NAME = "sri_documents"
+    COLLECTION_NAME = "sri_documents_transformer"
 
-    def __init__(self, embeddings: BasicEmbeddings | None = None) -> None:
+    def __init__(self, embeddings: Embeddings) -> None:
         self._embeddings = embeddings
+        self._persist_dir = str(Path("indexes/chroma_langchain").absolute())
 
-        # Connect to Chroma
-        host = os.getenv("CHROMA_HOST")
-        if host:
-            # Docker / Remote mode
-            port = int(os.getenv("CHROMA_PORT", 8000))
-            print(f"[VectorStore] Connecting to Chroma at {host}:{port}...")
-            self._client = chromadb.HttpClient(host=host, port=port)
-        else:
-            # Local mode
-            persist_dir = str(Path("indexes/chroma").absolute())
-            print(f"[VectorStore] Using local Chroma at {persist_dir}...")
-            self._client = chromadb.PersistentClient(path=persist_dir)
-
-        self._collection = self._client.get_or_create_collection(
-            name=self.COLLECTION_NAME, metadata={"hnsw:space": "cosine"}
+        self._vectorstore = Chroma(
+            collection_name=self.COLLECTION_NAME,
+            embedding_function=self._embeddings,
+            persist_directory=self._persist_dir,
         )
 
     def setup(
-        self, doc_ids: list[str], vectors: np.ndarray, doc_info: dict[str, dict]
+        self,
+        doc_ids: list[str],
+        texts: list[str],
+        metadatas: list[dict],
+        reset: bool = True,
     ) -> None:
         """
-        Initialise the store with pre-computed vectors and metadata.
+        Initialise the store with documents.
         """
-        if len(doc_ids) != vectors.shape[0]:
-            raise ValueError("Size mismatch between IDs and vectors.")
+        if reset:
+            self._vectorstore.delete_collection()
+            self._vectorstore = Chroma(
+                collection_name=self.COLLECTION_NAME,
+                embedding_function=self._embeddings,
+                persist_directory=self._persist_dir,
+            )
 
-        # Chroma expects list of lists for embeddings
-        embeddings_list = vectors.astype(float).tolist()
+        print(f"[VectorStore] Adding {len(doc_ids)} documents to Chroma...")
 
-        # metadatas is a list of dicts corresponding to ids
-        metadatas = [doc_info[did] for did in doc_ids]
-        # Batch add/upsert
-        print(f"[VectorStore] Upserting {len(doc_ids)} documents to Chroma...")
-        self._collection.upsert(
-            ids=doc_ids, embeddings=embeddings_list, metadatas=metadatas
-        )
-        print(f"[VectorStore] Initialised with {self._collection.count()} documents.")
+        clean_metadatas = [self._clean_metadata(m) for m in metadatas]
 
-    def search(
-        self, query: str | list[float] | np.ndarray, top_k: int = 10
-    ) -> list[dict]:
-        """
-        Rank documents by similarity using Chroma.
-        """
-        if isinstance(query, str):
-            if self._embeddings is None:
-                raise RuntimeError("Need embeddings model to search raw strings.")
-            q_vec = self._embeddings.embed_query(query)
-        else:
-            q_vec = list(query) if isinstance(query, np.ndarray) else query
-
-        # Query Chroma
-        results = self._collection.query(
-            query_embeddings=[q_vec],
-            n_results=top_k,
-            include=["metadatas", "distances"],
+        self._vectorstore.add_texts(texts=texts, metadatas=clean_metadatas, ids=doc_ids)
+        print(
+            f"[VectorStore] Initialised with {self.stats()['num_documents']} documents."
         )
 
-        # Format output to match previous interface
+    def search(self, query: str, top_k: int = 10) -> list[dict]:
+        """
+        Rank documents by similarity.
+        """
+        results = self._vectorstore.similarity_search_with_relevance_scores(
+            query, k=top_k
+        )
+
         output = []
-        if not results["ids"]:
-            return output
-
-        for i, (doc_id, metadata, distance) in enumerate(
-            zip(results["ids"][0], results["metadatas"][0], results["distances"][0]),
-            start=1,
-        ):
-
-            # So score = 1 - distance
-            score = 1.0 - float(distance)
-
+        for i, (doc, score) in enumerate(results, start=1):
+            metadata = doc.metadata
             output.append(
                 {
                     "rank": i,
-                    "doc_id": doc_id,
+                    "doc_id": doc.id if hasattr(doc, "id") else metadata.get("url", ""),
                     "score": round(score, 6),
                     "title": metadata.get("title", ""),
-                    "url": metadata.get("url", doc_id),
+                    "url": metadata.get("url", ""),
                     "source": metadata.get("source", ""),
-                    "date": metadata.get("date", ""),
-                    "tags": metadata.get("tags", []),
-                    "category": metadata.get("category", ""),
+                    "content_preview": doc.page_content[:200] + "...",
+                    "metadata": metadata,
                 }
             )
 
         return output
 
-    def add_document(self, document: dict) -> None:
-        """
-        Add a single document. Requires self._embeddings.
-        """
-        if self._embeddings is None:
-            raise RuntimeError("Need embeddings model to add documents.")
-
-        doc_id = str(document.get("id") or document.get("url", ""))
-        text = f"{document.get('title', '')} {document.get('content', '')}"
-        vec = self._embeddings.embed_query(text)
-
-        # Clean metadata for Chroma (must be str, int, float, or bool)
-        metadata = {
-            k: v
-            for k, v in document.items()
-            if k not in ("id", "content") and isinstance(v, (str, int, float, bool))
-        }
-
-        self._collection.upsert(ids=[doc_id], embeddings=[vec], metadatas=[metadata])
-
-    def save(self, directory: str | Path) -> None:
-        """In-process persistence is handled by PersistentClient."""
-        print(
-            f"[VectorStore] Data persistent in Chroma collection '{self.COLLECTION_NAME}'"
-        )
-
-    @classmethod
-    def load(
-        cls, directory: str | Path, embeddings: BasicEmbeddings | None = None
-    ) -> "VectorStore":
-        """Load the store."""
-        return cls(embeddings=embeddings)
+    def as_retriever(self, **kwargs):
+        """Return the LangChain retriever interface."""
+        return self._vectorstore.as_retriever(**kwargs)
 
     def stats(self) -> dict:
+        # Chroma LangChain doesn't expose count directly easily without accessing _collection
+        count = self._vectorstore._collection.count()
         return {
-            "num_documents": self._collection.count(),
+            "num_documents": count,
             "collection_name": self.COLLECTION_NAME,
         }
 
+    @staticmethod
+    def _clean_metadata(metadata: dict) -> dict:
+        """Convert metadata to Chroma-compatible scalar values."""
+        clean = {}
+        for key, value in metadata.items():
+            if value is None:
+                clean[key] = ""
+            elif isinstance(value, (str, int, float, bool)):
+                clean[key] = value
+            elif isinstance(value, list):
+                clean[key] = ", ".join(str(v) for v in value)
+            elif isinstance(value, dict):
+                clean[key] = json.dumps(value, ensure_ascii=False)
+            else:
+                clean[key] = str(value)
+        return clean
+
     def __repr__(self) -> str:
-        return f"VectorStore(Chroma: {self.COLLECTION_NAME}, docs={self._collection.count()})"
+        return f"VectorStore(Chroma LC: {self.COLLECTION_NAME})"

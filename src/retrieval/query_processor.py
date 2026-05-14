@@ -5,8 +5,11 @@ import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from src.indexing.indexer import TextNormalizer
+
 if TYPE_CHECKING:
     from src.retrieval.lm_retriever import LMRetriever
+
 
 @dataclass
 class ProcessedQuery:
@@ -36,12 +39,12 @@ class QueryProcessor:
 
     Parameters
     ----------
-    expand_synonyms : bool – expand with dynamic WordNet synonyms
-                             (default True)
+    normalizer : TextNormalizer | None
+        Shared normalizer used by the index and retriever.
     """
 
-    def __init__(self) -> None:
-        pass
+    def __init__(self, normalizer: TextNormalizer | None = None) -> None:
+        self.normalizer = normalizer or TextNormalizer()
 
     def process(self, raw_query: str) -> ProcessedQuery:
         """
@@ -52,13 +55,15 @@ class QueryProcessor:
         1. Normalise whitespace and casing
         2. Detect explicit filters (``source:xataka``)
         """
+
         query = self._clean(raw_query)
         filters: dict[str, str] = {}
 
         # Extracts filter prefixes
         text, filters = self._extract_filters(query)
 
-        tokens = text.split()
+        tokens = self.normalizer.normalize_query(text)
+        text = " ".join(tokens)
 
         return ProcessedQuery(
             original=raw_query,

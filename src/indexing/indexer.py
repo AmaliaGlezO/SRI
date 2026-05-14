@@ -10,6 +10,7 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
 from nltk.tokenize import word_tokenize
+import emoji
 
 
 def _ensure_nltk() -> None:
@@ -61,6 +62,8 @@ class TextNormalizer:
         # strip non-alphanumeric (keep letters, digits and spaces)
         text = re.sub(r"[^a-záéíóúüñ\w\s]", " ", text, flags=re.UNICODE)
 
+        # remove emojis
+        text = emoji.replace_emoji(text, replace="")
         # tokenize
         tokens = word_tokenize(text, language="spanish")
 
@@ -138,8 +141,13 @@ class InvertedIndex:
                 "url": doc.get("url", ""),
                 "source": doc.get("source", ""),
                 "date": doc.get("date", ""),
+                "author": doc.get("author", ""),
                 "tags": doc.get("tags", []),
                 "category": doc.get("category", ""),
+                "subcategory": doc.get("subcategory", ""),
+                "brand": doc.get("brand", ""),
+                "os": doc.get("os", ""),
+                "image": (doc.get("metadata") or {}).get("image", ""),
             }
             self._N += 1
 
@@ -196,26 +204,3 @@ class InvertedIndex:
             "num_documents": self._N,
             "vocabulary_size": len(self._vocab),
         }
-
-
-if __name__ == "__main__":
-    from src.indexing.storage import DocumentStore
-    import sys
-
-    print(f"\n[Indexer] Building InvertedIndex...")
-
-    store = DocumentStore("data")
-    store.load_all()
-    documents = store.all()
-
-    if not documents:
-        print("[Indexer] Error: No documents found in data/ directory.")
-        sys.exit(1)
-
-    print(f"[Indexer] Loaded {len(documents)} documents.")
-
-    idx = InvertedIndex()
-    idx.build(documents)
-
-    idx.save("indexes/index")
-    print(f"[Indexer] Indexing complete.\n")

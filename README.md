@@ -1,115 +1,87 @@
-# SRI — Sistema de Recuperación de Información de Noticias
+# SRI - Sistema de Recuperación de Información de Noticias
 
-Motor de búsqueda sobre noticias tecnológicas de [Xataka](https://www.xataka.com/) (categorías móvil y PC).  
-El sistema utiliza el modelo **Modelo Probabilístico de Lenguaje (Query Likelihood)** con **Suavizado de Dirichlet**, incorporando además **Pseudo-Relevance Feedback (RM3)** para expansión de consultas y **Chroma DB** como base de datos de vectores.
+Motor de búsqueda sobre artículos tecnológicos de Xataka, centrado en móviles y PC/hardware. El sistema integra crawling, scraping, índice invertido, modelo de lenguaje probabilístico, base vectorial Chroma, recuperación híbrida, RAG extractivo, evaluación e interfaz visual.
 
----
+## Componentes
 
-## Requisitos
-
-| Herramienta | Versión mínima |
-|-------------|----------------|
-| Docker      | 24+            |
-| Docker Compose | v2 (`docker compose`) |
-
-No es necesario instalar Python ni ninguna dependencia en el host; el entorno está completamente contenedorizado, utilizando `uv` para la gestión de paquetes.
-
----
-
-## Estructura del proyecto
-
-```
-.
-├── data/               # Artículos scrapeados (.jsonl), generados por los spiders
-├── indexes/            # Índice invertido, modelo LM y persistencia de Chroma
-│   ├── index/          # Inverted Index (pickle)
-│   ├── lm/             # Modelo LM + estadísticas de colección
-│   └── chroma/         # Datos persistentes de Chroma DB
-├── logs/               # Logs de ejecución de los spiders
-├── src/
-│   ├── extract_data/   # Spiders de Scrapy + pipelines
-│   ├── indexing/       # Construcción del índice invertido y almacenamiento
-│   ├── retrieval/      # LM Retriever (Dirichlet) + RM3 (Query Processor)
-│   └── vector_db/      # Integración con Chroma DB + Embeddings (TF-IDF)
-├── main.py             # CLI principal (build & query)
-├── docker-compose.yml
-└── dockerfile
+```text
+src/extract_data/   Spiders Scrapy, items, pipelines y logging
+src/indexing/       DocumentStore, normalización, índice invertido y estadísticas
+src/retrieval/      QueryProcessor, LM Dirichlet, RM3 y ranking híbrido
+src/vector_db/      Embeddings TF-IDF persistentes y Chroma DB
+src/rag/            Generación extractiva con citas
+src/evaluation/     Precision, Recall, F1, MRR y NDCG
+src/ui/             Interfaz visual con http.server
+data/               Corpus JSONL por categoría
+indexes/            Índices persistidos y Chroma
+report/             Documentación, estadísticas y consultas de evaluación
 ```
 
----
-
-## Paso a paso
-
-### 1. Construir la imagen
+## Ejecución con Docker
 
 ```bash
 docker compose build
-```
-
----
-
-### 2. Ejecutar los spiders (scraping)
-
-```bash
 docker compose run --rm crawl
-```
-
-Extrae artículos de *Xataka Móvil* y *Xataka PC* en paralelo, guardándolos en `data/`. Los logs se escriben en `logs/`.
-
----
-
-### 3. Construir el índice invertido
-
-```bash
-docker compose run --rm index
-```
-
-Lee los `.jsonl` de `data/`, construye el índice invertido (TF, metadata, vocabulario) y lo guarda en `indexes/index/`.
-
----
-
-### 4. Construir el Modelo de Lenguaje y Vector Store
-
-```bash
 docker compose run --rm vector-index
-```
-
-Este comando realiza dos acciones clave:
-1.  **Entrenar el LM**: Ajusta un modelo de lenguaje con **Suavizado de Dirichlet** (μ=2000) a partir del índice.
-2.  **Inicializar Chroma**: Popula la base de datos **Chroma DB** con vectores TF-IDF generados a partir del contenido de los documentos.
-
----
-
-### 5. Realizar consultas interactivas
-
-```bash
 docker compose run --rm -it query
 ```
 
-Inicia la interfaz de búsqueda interactiva. El proceso de recuperación incluye:
-1.  **Procesamiento de Consulta**: Normalización y extracción de tokens.
-2.  **RM3 (Pseudo-Relevance Feedback)**: Expansión automática de la consulta basada en los 5 documentos principales (α=0.5).
-3.  **Ranking Probabilístico**: Clasificación de documentos según la probabilidad de que el documento haya generado la consulta expandida.
-
----
-
-## Flujo completo (One-linear)
-
-Puedes ejecutar todo el pipeline de inicio a fin con:
+Interfaz visual:
 
 ```bash
-docker compose build && \
-docker compose run --rm crawl && \
-docker compose run --rm index && \
-docker compose run --rm vector-index && \
-docker compose run --rm -it query
+docker compose up ui
 ```
 
----
+Abrir `http://127.0.0.1:8080`.
 
-## Detalles Técnicos
+## Ejecución local
 
-- **Suavizado de Dirichlet**: Se utiliza para manejar términos ausentes en documentos individuales pero presentes en la colección total. Parámetro por defecto **μ=2000**.
-- **RM3 (RM1 Interpolado)**: Mejora la relevancia al expandir la consulta original con términos provenientes de los documentos recuperados inicialmente. Combina la consulta original (α=0.5) con el modelo de relevancia (1-α=0.5).
-- **Chroma DB**: Utilizado para almacenamiento eficiente y búsqueda por similitud de coseno sobre representaciones vectoriales.
-- **Normalización**: Uso de NLTK para tokenización en español, eliminación de stop-words y limpieza de caracteres no alfanuméricos.
+Requiere `uv`.
+
+```bash
+uv run python main.py --build
+uv run python main.py --query --rag --top-k 5
+uv run python main.py --serve --host 127.0.0.1 --port 8080
+```
+
+## Pipeline
+
+`main.py --build` ejecuta el flujo completo:
+
+1. Carga documentos JSONL desde `data/`.
+2. Construye y guarda el índice invertido en `indexes/index/`.
+3. Entrena y guarda el modelo LM Dirichlet en `indexes/lm/`.
+4. Entrena embeddings TF-IDF y los guarda en `indexes/vector_store/`.
+5. Puebla Chroma DB con vectores y metadatos.
+6. Genera estadísticas en `report/corpus_stats.json`.
+
+## Modelo de recuperación
+
+El ranking principal usa Query Likelihood con suavizado de Dirichlet (`μ=2000`). Encima se aplica RM3 para expansión por pseudo-relevance feedback. El ranking final combina:
+
+- LM: 0.70.
+- Similitud vectorial Chroma: 0.25.
+- Frescura: 0.05.
+
+## Consultas
+
+La consola y la UI aceptan lenguaje natural. También se admiten filtros simples:
+
+```text
+category:mobile samsung bateria
+source:xataka_pc teclado mecanico
+```
+
+## Evaluación
+
+```bash
+uv run python main.py --eval --top-k 10
+```
+
+Las consultas iniciales y relevancias están en `report/evaluation_queries.json`.
+
+## Documentación
+
+- `report/documentacion_tecnica.md`
+- `report/estado_cortes.md`
+- `report/manual_usuario.md`

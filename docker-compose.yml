@@ -1,0 +1,60 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=INFO
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./indexes:/app/indexes
+    networks:
+      - sri-network
+    depends_on:
+      - chroma
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  chroma:
+    image: ghcr.io/chroma-core/chroma:latest
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    networks:
+      - sri-network
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+
+  # Testing service
+  tests:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      - api
+    volumes:
+      - ./tests:/app/tests
+      - ./coverage:/app/coverage
+    networks:
+      - sri-network
+    environment:
+      - PYTHONUNBUFFERED=1
+      - API_URL=http://api:8000
+
+networks:
+  sri-network:
+    driver: bridge
+
+volumes:
+  chroma_data:

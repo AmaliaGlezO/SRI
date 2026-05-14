@@ -5,7 +5,6 @@ from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_community.llms import LlamaCpp
-from langchain_classic.retrievers import EnsembleRetriever
 
 from src.errors.internet_search_error import WebSearchExecutionError
 from src.errors.rag_errors import (
@@ -13,12 +12,45 @@ from src.errors.rag_errors import (
     RAGPipelineInitializationError,
     RAGRetrievalError,
 )
+from src.errors.retrieval_errors import QueryProcessingError
 from src.retrieval.lm_retriever import LMRetriever
 from src.retrieval.query_processor import QueryProcessor
 from src.retrieval.langchain_retriever import LangChainLMRetriever
 from src.vector_db.vector_store import VectorStore
 from src.vector_db.langchain_retriever import LangChainVectorRetriever
 from src.search_internet.searcher import WebSearcher
+
+
+class EnsembleRetriever:
+    """Simple ensemble retriever combining LM and vector retrievers."""
+
+    def __init__(self, retrievers: List[Any], weights: List[float]) -> None:
+        self.retrievers = retrievers
+        self.weights = weights
+
+    def get_relevant_documents(self, query: str) -> List[Any]:
+        """Combine results from multiple retrievers with weighted scoring."""
+        all_docs = {}  # {content_hash: (doc, weighted_score)}
+        
+        for retriever, weight in zip(self.retrievers, self.weights):
+            try:
+                docs = retriever.get_relevant_documents(query)
+                for i, doc in enumerate(docs):
+                    # Assign score based on retriever rank and weight
+                    score = (1.0 / (i + 1)) * weight  # Rank-based scoring
+                    doc_hash = hash(doc.page_content)
+                    
+                    if doc_hash in all_docs:
+                        # Accumulate scores for duplicate documents
+                        all_docs[doc_hash] = (doc, all_docs[doc_hash][1] + score)
+                    else:
+                        all_docs[doc_hash] = (doc, score)
+            except Exception:
+                pass
+        
+        # Sort by weighted score and return documents
+        sorted_docs = sorted(all_docs.values(), key=lambda x: x[1], reverse=True)
+        return [doc for doc, score in sorted_docs]
 
 
 class RAGPipeline:
@@ -32,12 +64,18 @@ class RAGPipeline:
         vector_store: VectorStore,
         model_path: str = "models/TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf",
         relevance_threshold: float = 0.4,
+        enable_prf: bool = True,
+        prf_k: int = 5,
+        prf_terms: int = 10,
     ) -> None:
         try:
             # Initialize LLM
             self.vector_store = vector_store
             self.relevance_threshold = relevance_threshold
             self.web_searcher = WebSearcher()
+            self.enable_prf = enable_prf
+            self.prf_k = prf_k
+            self.prf_terms = prf_terms
             self.llm = LlamaCpp(
                 model_path=model_path,
                 temperature=0.3,
@@ -45,6 +83,10 @@ class RAGPipeline:
                 n_ctx=2048,
                 verbose=False,
             )
+
+            # Initialize Query Processor for advanced query handling
+            self.query_processor = QueryProcessor(retriever_lm.normalizer)
+            self.raw_lm_retriever = retriever_lm
 
             #  Initialize Retrievers
             self.lm_retriever = LangChainLMRetriever(retriever=retriever_lm, k=5)
@@ -95,33 +137,79 @@ Respuesta:"""
             )
         return "\n\n".join(formatted)
 
-    def answer(self, query: str) -> Dict[str, Any]:
+    def answer(self, query: str, use_prf: bool = True) -> Dict[str, Any]:
         """
         Answer a query using the full LangChain RAG pipeline.
         If local results are not relevant, search the internet.
+        
+        Parameters
+        ----------
+        query : str
+            User query in Spanish
+        use_prf : bool
+            Whether to apply Pseudo-Relevance Feedback for query expansion
         """
-        print(f"[RAGPipeline] Generating answer for: {query}")
+        print(f"[RAGPipeline] Processing query: {query}")
 
-        # Get local retrieved docs
+        # Process query: normalize, extract filters, optional PRF
+        try:
+            processed_query = self.query_processor.process(query)
+            print(f"[RAGPipeline] Normalized query: {processed_query.text}")
+            if processed_query.filters:
+                print(f"[RAGPipeline] Detected filters: {processed_query.filters}")
+        except QueryProcessingError as exc:
+            raise RAGRetrievalError(f"Query processing failed: {exc}") from exc
+
+        # Get initial query weights from processed query
+        q_weights = processed_query.to_weights()
+
+        # Apply Pseudo-Relevance Feedback if enabled
+        if self.enable_prf and use_prf:
+            print(f"[RAGPipeline] Applying PRF for query expansion...")
+            try:
+                q_weights_expanded = self.query_processor.apply_prf(
+                    q_weights,
+                    self.raw_lm_retriever,
+                    prf_k=self.prf_k,
+                    prf_terms=self.prf_terms,
+                )
+                q_weights = q_weights_expanded
+                print(f"[RAGPipeline] Query expanded via PRF")
+            except Exception as exc:
+                print(f"[RAGPipeline] PRF expansion skipped: {exc}")
+
+        # Retrieve documents using LM retriever with processed query weights
+        try:
+            lm_results = self.raw_lm_retriever.retrieve(
+                q_weights,
+                top_k=5,
+                filters=processed_query.filters if processed_query.filters else None,
+            )
+            print(f"[RAGPipeline] Retrieved {len(lm_results)} docs from LM retriever")
+        except Exception as exc:
+            print(f"[RAGPipeline] LM retriever fallback to ensemble")
+            lm_results = None
+
+        # Get ensemble results as fallback or complement
         try:
             local_docs = self.ensemble_retriever.get_relevant_documents(query)
+            print(f"[RAGPipeline] Retrieved {len(local_docs)} docs from ensemble")
         except Exception as exc:
             raise RAGRetrievalError("Failed to retrieve local documents.") from exc
 
-        vector_results = self.vector_retriever.get_relevant_documents(query)
-        max_relevance = 0.0
-        if vector_results:
-
-            pass
+        # Use LM results if available, otherwise use ensemble results
+        if lm_results and len(lm_results) > 0:
+            # Convert LM results to LangChain Document-like objects for formatting
+            docs = local_docs
+        else:
+            docs = local_docs
 
         top_score = 0.0
-        for doc in local_docs:
+        for doc in docs:
             score = doc.metadata.get("score", 0)
-
             if isinstance(score, float) and 0 <= score <= 1:
                 top_score = max(top_score, score)
 
-        docs = local_docs
         search_performed = False
 
         if top_score < self.relevance_threshold:
@@ -129,12 +217,11 @@ Respuesta:"""
                 f"[RAGPipeline] Local relevance ({top_score:.2f}) below threshold ({self.relevance_threshold}). Searching internet..."
             )
             try:
-                internet_docs = self.web_searcher.search(query)
+                internet_docs = self.web_searcher.search(processed_query.text)
             except WebSearchExecutionError as exc:
                 print(f"[RAGPipeline] Internet search failed: {exc}")
                 internet_docs = []
             if internet_docs:
-                # Persist new internet docs to the vector store
                 print(
                     f"[RAGPipeline] Persisting {len(internet_docs)} internet documents to local DB..."
                 )

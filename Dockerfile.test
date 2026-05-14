@@ -1,0 +1,25 @@
+# Test stage
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy application
+COPY . .
+
+# Install dependencies including test requirements
+RUN pip install --upgrade pip && \
+    pip install -e . && \
+    pip install pytest pytest-cov pytest-asyncio httpx
+
+# Create test and coverage directories
+RUN mkdir -p tests coverage
+
+# Run tests by default
+CMD ["pytest", "tests/", "-v", "--cov=src", "--cov-report=html:coverage", "--cov-report=term"]

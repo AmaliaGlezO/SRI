@@ -1,4 +1,8 @@
 # Scrapy settings
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 BOT_NAME = "sri"
 
@@ -9,43 +13,42 @@ SPIDER_MODULES = [
 NEWSPIDER_MODULE = "src.extract_data"
 
 
-USER_AGENT = (
+USER_AGENT = os.getenv("USER_AGENT",(
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
     "Chrome/123.0.0.0 Safari/537.36"
-)
-
+))
 
 # Always respect robots.txt
-ROBOTSTXT_OBEY = True
+ROBOTSTXT_OBEY = os.getenv('ROBOTSTXT_OBEY',True)
 
 
 # Hard timeout per spider (seconds). Prevents runaway crawls.
-CLOSESPIDER_TIMEOUT = 3600  # 1 hour
+CLOSESPIDER_TIMEOUT = os.getenv('CLOSESPIDER_TIMEOUT',3500)  # 1 hour
 
 # Explicit crawl depth policy for the project deliverable. Listing pages are
 # followed into articles and limited pagination without allowing open-ended crawl.
-DEPTH_LIMIT = 3
+DEPTH_LIMIT = os.getenv('DEPTH_LIMIT',3)
 
 # maximum concurrent requests
-CONCURRENT_REQUESTS = 8
-CONCURRENT_REQUESTS_PER_DOMAIN = 4
+CONCURRENT_REQUESTS = os.getenv('CONCURRENT_REQUESTS',8)
+CONCURRENT_REQUESTS_PER_DOMAIN = os.getenv('CONCURRENT_REQUESTS_PER_DOMAIN',4)
 
 # Disable cookies (reduces tracking / server load)
-COOKIES_ENABLED = False
+COOKIES_ENABLED = os.getenv('COOKIES_ENABLED',False)
 
-DEFAULT_REQUEST_HEADERS = {
+DEFAULT_REQUEST_HEADERS = os.getenv("DEFAULT_REQUEST_HEADERS",{
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Language": "es,en;q=0.9",
-}
+})
 
-AUTOTHROTTLE_ENABLED = True
-AUTOTHROTTLE_START_DELAY = 2
-AUTOTHROTTLE_MAX_DELAY = 60
-AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
+AUTOTHROTTLE_ENABLED = os.getenv("AUTOTHROTTLE_ENABLED",True)
+AUTOTHROTTLE_START_DELAY = os.getenv("AUTOTHROTTLE_START_DELAY",2)
+AUTOTHROTTLE_MAX_DELAY = os.getenv("AUTOTHROTTLE_MAX_DELAY",60)
+AUTOTHROTTLE_TARGET_CONCURRENCY = os.getenv("AUTOTHROTTLE_TARGET_CONCURRENCY",1.0)
 
-HTTPCACHE_ENABLED = True
-HTTPCACHE_EXPIRATION_SECS = 86400  # 24 hours
+HTTPCACHE_ENABLED = os.getenv("HTTPCACHE_ENABLED",True)
+HTTPCACHE_EXPIRATION_SECS = os.getenv("HTTPCACHE_EXPIRATION_SECS",86400)  # 24 hours
 HTTPCACHE_DIR = "httpcache"
 HTTPCACHE_IGNORE_HTTP_CODES = [500, 502, 503, 504, 400, 403, 404, 408, 429]
 HTTPCACHE_STORAGE = "scrapy.extensions.httpcache.FilesystemCacheStorage"

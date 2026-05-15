@@ -75,11 +75,11 @@ RAG_PRF_TERMS = _get_env_int("RAG_PRF_TERMS", 10)
 
 # Retriever weights (LM vs Vector)
 RAG_LM_RETRIEVER_WEIGHT = _get_env_float("RAG_LM_RETRIEVER_WEIGHT", 0.5)
-RAG_MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS", 500))
+RAG_MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS", 300))
 RAG_VECTOR_RETRIEVER_WEIGHT = _get_env_float("RAG_VECTOR_RETRIEVER_WEIGHT", 0.5)
 
 # Number of documents to retrieve
-RAG_RETRIEVER_K = _get_env_int("RAG_RETRIEVER_K", 5)
+RAG_RETRIEVER_K = _get_env_int("RAG_RETRIEVER_K", 3)
 
 # ============================================================================
 # VECTOR DB CONFIGURATION

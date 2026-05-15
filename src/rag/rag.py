@@ -134,14 +134,28 @@ class RAGPipeline:
             )
 
             # Define Prompt
-            template = """Basandote unicamente en la siguiente informacion, responde la pregunta del usuario de manera clara y concisa.
+            template = """Eres un asistente de tecnologia especializado en tecnologia, moviles, PCs y comparaciones de productos.
+
+Basandote unicamente en la siguiente informacion, responde la pregunta del usuario.
 
 Contexto:
 {context}
 
 Pregunta del usuario: {question}
 
-Responde en espanol usando solo la informacion proporcionada en el contexto. Es OBLIGATORIO incluir citaciones en el texto usando el formato [n] (por ejemplo, [1], [2]) para indicar de qué documento proviene la información. Si la informacion no esta disponible, indica que no hay suficiente informacion. y DETENTE
+Instrucciones:
+- Responde en ESPAÑOL
+- Usa FORMATO MARKDOWN para facilitar el parseo
+- Para comparaciones usa TABLAS en formato markdown:
+  | Caracteristica | Producto 1 | Producto 2 | ....  | Prdocuto N |
+  |----------------|------------|------------| ....  |------------|
+  | Valor 1        | Dato 1     | Dato 2     | ....  | Dato N     |
+- Para listas usabullet points con guiones (-)
+- Incluye CITACIONES usando el formato [n] donde n es el numero del documento
+- Si la pregunta es sobre ranking o "mejor", haz una lista numerada con los top 3-5
+- Si la pregunta requiere comparacion, haz una tabla comparativa
+- Si no tienes suficiente informacion, indica que no puedes responder
+- NUNCA inventes informacion que no este en el contexto
 
 Respuesta:"""
             self.prompt = PromptTemplate.from_template(template)
@@ -162,9 +176,7 @@ Respuesta:"""
             ) from exc
 
     def _format_docs(self, docs: List[Any]) -> str:
-        # Estimate available context window in characters
-        # Llama 2/3 context is n_ctx tokens. We leave 400 for instructions/query.
-        # Conservative estimate: 3 characters per token.
+    
         max_total_chars = (MODEL_N_CTX - 400) * 3
         limit = self.max_doc_chars if self.max_doc_chars is not None else max_total_chars
         
@@ -210,7 +222,7 @@ Respuesta:"""
         query : str
             User query in Spanish
         use_rag : bool
-            Whether to use the configurable RAG overrides
+            Whether to use the RAG pipeline (if False, use LLM directly without context)
         top_k : int, optional
             Number of documents to retrieve
         use_prf : bool
@@ -224,16 +236,53 @@ Respuesta:"""
         use_internet_search : bool
             Whether to allow internet fallback search
         """
-        # Overrides logic
-        effective_threshold = (
-            relevance_threshold if use_rag and relevance_threshold is not None else RAG_RELEVANCE_THRESHOLD
-        )
-        effective_top_k = top_k if use_rag and top_k is not None else RAG_RETRIEVER_K
-        self.max_doc_chars = max_doc_chars if use_rag and max_doc_chars is not None else RAG_MAX_DOC_CHARS
-        
-        if use_rag and temperature is not None and hasattr(self.llm, 'temperature'):
+        # Handle temperature override
+        original_temperature = None
+        if temperature is not None and hasattr(self.llm, 'temperature'):
+            original_temperature = self.llm.temperature
             self.llm.temperature = temperature
 
+        # Mode without RAG: use LLM directly without context
+        if not use_rag:
+            print(f"[RAGPipeline] RAG disabled - using LLM directly without context")
+            try:
+                # Simple prompt for direct LLM response
+                simple_template = """Pregunta: {question}
+
+Responde en español de manera clara y concisa. Si no tienes información suficiente, indica que no puedes responder la pregunta.
+
+Respuesta:"""
+                simple_prompt = PromptTemplate.from_template(simple_template)
+                answer_text = (simple_prompt | self.llm | StrOutputParser()).invoke(
+                    {"question": query}
+                )
+                print(f"[RAGPipeline] Direct LLM answer generated")
+            except Exception as exc:
+                print(f"[RAGPipeline] Direct LLM generation failed: {exc}")
+                raise RAGAnswerGenerationError("Failed to generate answer without RAG.") from exc
+            finally:
+                # Restore original temperature
+                if original_temperature is not None:
+                    self.llm.temperature = original_temperature
+
+            return {
+                "query": query,
+                "answer": answer_text.strip(),
+                "sources": [],
+                "search_performed": False,
+                "top_local_score": 0.0,
+                "retrieved_documents": [],
+                "status": ["Procesando consulta", "Generando respuesta con LLM directo"],
+            }
+
+        # RAG mode enabled
+        effective_threshold = (
+            relevance_threshold if relevance_threshold is not None else RAG_RELEVANCE_THRESHOLD
+        )
+        effective_top_k = top_k if top_k is not None else RAG_RETRIEVER_K
+        self.max_doc_chars = max_doc_chars if max_doc_chars is not None else RAG_MAX_DOC_CHARS
+
+        status_steps = []
         print(f"[RAGPipeline] Processing query: {query}")
 
         # Process query: normalize, extract filters, optional PRF
@@ -251,6 +300,7 @@ Respuesta:"""
         # Apply Pseudo-Relevance Feedback if enabled
         if use_rag and self.enable_prf and use_prf:
             print(f"[RAGPipeline] Applying PRF for query expansion...")
+            
             try:
                 q_weights_expanded = self.query_processor.apply_prf(
                     q_weights,
@@ -260,10 +310,12 @@ Respuesta:"""
                 )
                 q_weights = q_weights_expanded
                 print(f"[RAGPipeline] Query expanded via PRF")
+                print(f"[RAGPipeline] Expanded query: {processed_query.text}")
             except Exception as exc:
                 print(f"[RAGPipeline] PRF expansion skipped: {exc}")
 
         # Retrieve documents using LM retriever with processed query weights
+        
         try:
             lm_results = self.raw_lm_retriever.retrieve(
                 q_weights,
@@ -280,6 +332,7 @@ Respuesta:"""
             local_docs = self.ensemble_retriever.invoke(query)
             local_docs = local_docs[:effective_top_k]
             print(f"[RAGPipeline] Retrieved {len(local_docs)} docs from ensemble")
+            
         except Exception as exc:
             raise RAGRetrievalError("Failed to retrieve local documents.") from exc
 
@@ -302,6 +355,7 @@ Respuesta:"""
             print(
                 f"[RAGPipeline] Local relevance ({top_score:.2f}) below threshold ({effective_threshold}). Searching internet..."
             )
+            
             try:
                 internet_docs = self.web_searcher.search(processed_query.text)
             except WebSearchExecutionError as exc:
@@ -312,23 +366,39 @@ Respuesta:"""
                     f"[RAGPipeline] Persisting {len(internet_docs)} internet documents to local DB..."
                 )
                 self.vector_store.add_documents(internet_docs)
-                docs = internet_docs + local_docs
+                
+                all_docs = local_docs + internet_docs
+                
+                all_docs_with_scores = []
+                for doc in all_docs:
+                    score = doc.metadata.get("score", 0.5)
+                    all_docs_with_scores.append((score, doc))
+                
+                all_docs_with_scores.sort(key=lambda x: x[0], reverse=True)
+                
+                docs = [doc for score, doc in all_docs_with_scores[:effective_top_k]]
+                
                 search_performed = True
+                
 
         print(f"[RAGPipeline] Formatting {len(docs)} documents for context...")
+        
         context = self._format_docs(docs)
 
         try:
             if search_performed:
                 print(f"[RAGPipeline] Generating answer with internet search context...")
+                
                 chain_input = {"context": context, "question": query}
                 answer_text = (self.prompt | self.llm | StrOutputParser()).invoke(
                     chain_input
                 )
             else:
                 print(f"[RAGPipeline] Generating answer with local ensemble context...")
+                
                 answer_text = self.chain.invoke(query)
             print(f"[RAGPipeline] Answer generated successfully")
+            
         except Exception as exc:
             print(f"[RAGPipeline] Answer generation failed: {exc}")
             raise RAGAnswerGenerationError("Failed to generate final answer.") from exc
@@ -358,4 +428,5 @@ Respuesta:"""
                 }
                 for d in docs
             ],
+            "status": status_steps,
         }

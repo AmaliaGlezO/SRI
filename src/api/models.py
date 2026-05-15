@@ -1,6 +1,6 @@
 """Pydantic models for API request/response schemas."""
 
-from typing import Any, List, Optional
+from typing import List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -60,6 +60,10 @@ class QueryResponse(BaseModel):
     top_local_score: float = Field(description="Relevance score of top local result")
     retrieved_documents: List[RetrievedDocument] = Field(
         description="Documents retrieved and used"
+    )
+    status: List[str] = Field(
+        default_factory=list,
+        description="Pipeline steps performed during query processing"
     )
 
 

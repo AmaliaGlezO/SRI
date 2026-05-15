@@ -80,7 +80,7 @@ class TextNormalizer:
         tokens = word_tokenize(text, language="spanish")
 
         # filter stop-words and short tokens
-        tokens = [t for t in tokens if t not in _STOP_WORDS and len(t) > 1]
+        tokens = [t for t in tokens if t not in _STOP_WORDS]
 
         return tokens
 

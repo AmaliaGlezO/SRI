@@ -56,7 +56,21 @@ function App() {
         const userQuery = query
         setQuery('')
         setApiError('')
+
+        // Agregar mensaje del usuario
         setMessages((previous) => [...previous, { role: 'user', content: userQuery }])
+
+        // Crear un mensaje vacío del asistente con isStreaming=true para mostrar los tres puntos
+        setMessages((previous) => [
+            ...previous,
+            {
+                role: 'assistant',
+                content: '',
+                sources: [],
+                isStreaming: true,
+            },
+        ])
+
         setLoading(true)
 
         try {
@@ -79,22 +93,38 @@ function App() {
 
             const data = await response.json()
 
-            setMessages((previous) => [
-                ...previous,
-                {
-                    role: 'assistant',
-                    content: data.answer || 'No se pudo generar una respuesta.',
-                    sources: data.retrieved_documents || [],
-                    isStreaming: true,
-                },
-            ])
+            // Actualizar el mensaje del asistente con la respuesta real
+            setMessages((previous) => {
+                const updated = [...previous]
+                const lastIndex = updated.length - 1
+                if (updated[lastIndex] && updated[lastIndex].role === 'assistant') {
+                    updated[lastIndex] = {
+                        ...updated[lastIndex],
+                        content: data.answer || 'No se pudo generar una respuesta.',
+                        sources: data.retrieved_documents || [],
+                        isStreaming: false,
+                    }
+                }
+                return updated
+            })
         } catch (error) {
             console.error(error)
             setApiError('No se pudo completar la consulta. Revisa el estado de la API o ajusta los parámetros de RAG.')
-            setMessages((previous) => [
-                ...previous,
-                { role: 'assistant', content: 'Hubo un error al procesar tu solicitud. Por favor, inténtalo de nuevo.' },
-            ])
+
+            // Actualizar el mensaje del asistente con el error
+            setMessages((previous) => {
+                const updated = [...previous]
+                const lastIndex = updated.length - 1
+                if (updated[lastIndex] && updated[lastIndex].role === 'assistant') {
+                    updated[lastIndex] = {
+                        ...updated[lastIndex],
+                        content: 'Hubo un error al procesar tu solicitud. Por favor, inténtalo de nuevo.',
+                        isError: true,
+                        isStreaming: false,
+                    }
+                }
+                return updated
+            })
         } finally {
             setLoading(false)
         }
@@ -152,18 +182,20 @@ function App() {
                                 </h1>
                             </button>
                         </div>
-                        <button
-                            type="button"
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-200"
-                            aria-label={sidebarOpen ? 'Cerrar barra lateral' : 'Abrir barra lateral'}
-                            onClick={() => setSidebarOpen((prev) => !prev)}
-                        >
-                            {sidebarOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-                        </button>
+                        {!sidebarOpen && (
+                            <button
+                                type="button"
+                                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-200"
+                                aria-label="Abrir barra lateral"
+                                onClick={() => setSidebarOpen(true)}
+                            >
+                                <Menu className="h-5 w-5" />
+                            </button>
+                        )}
                     </div>
                 </nav>
 
-                <main className="mx-auto flex w-full max-w-5xl flex-1 px-6 pt-10">
+                <main className="mx-auto flex w-full max-w-3xl flex-1 px-4 py-6">
                     <div className="w-full">
                         {messages.length === 0 ? (
                             <WelcomePanel
@@ -171,68 +203,81 @@ function App() {
                                 onSuggestionClick={setQuery}
                             />
                         ) : (
-                            <div className="space-y-16 pb-32">
+                            <div className="space-y-8">
                                 {messages.map((message, index) => (
-                                    <div key={index} className="flex flex-col space-y-6 animate-in fade-in slide-in-from-bottom-6 duration-700 ease-out">
+                                    <div key={index} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                                         {message.role === 'user' && (
-                                            <div className="flex items-start gap-5">
-                                                <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-800 shadow-xl">
-                                                    <User className="h-5 w-5 text-slate-300" />
+                                            <div className="flex items-end justify-end gap-2">
+                                                <div className="max-w-[75%]">
+                                                    <div className="bg-indigo-600 rounded-2xl px-4 py-3 text-white text-base font-medium">
+                                                        {message.content}
+                                                    </div>
                                                 </div>
-                                                <h3 className="text-3xl font-bold leading-tight text-white">{message.content}</h3>
+                                                <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-full border border-white/10 bg-slate-700">
+                                                    <User className="h-3.5 w-3.5 text-slate-300" />
+                                                </div>
                                             </div>
                                         )}
 
                                         {message.role === 'assistant' && (
-                                            <div className="space-y-8 pl-0 sm:pl-14">
-                                                {message.sources && message.sources.length > 0 && (
-                                                    <div className="space-y-4">
-                                                        <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
-                                                            <div className="h-px w-4 bg-slate-800"></div>
-                                                            Fuentes Consultadas
+                                            <div className="flex items-start gap-3">
+                                                <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-[#1a1a2e] border border-white/10 shadow-lg">
+                                                    <Bot className="h-4 w-4 text-white" />
+                                                </div>
+                                                <div className="flex-1 space-y-4">
+                                                    {message.sources && message.sources.length > 0 && (
+                                                        <div className="space-y-4">
+                                                            <div className="flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">
+                                                                <div className="h-px w-4 bg-slate-800"></div>
+                                                                Fuentes Consultadas
+                                                            </div>
+                                                            <div className="flex flex-wrap gap-3">
+                                                                {message.sources.slice(0, 3).map((source, sourceIndex) => (
+                                                                    <a
+                                                                        key={sourceIndex}
+                                                                        href={source.url}
+                                                                        target="_blank"
+                                                                        rel="noopener noreferrer"
+                                                                        className="flex max-w-[220px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 shadow-sm transition-all hover:border-indigo-500/30 hover:bg-indigo-500/10"
+                                                                    >
+                                                                        <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-[10px] font-bold text-indigo-400 shadow-inner transition-all hover:bg-indigo-600 hover:text-white">
+                                                                            {sourceIndex + 1}
+                                                                        </div>
+                                                                        <div className="flex min-w-0 flex-col">
+                                                                            <span className="truncate text-[11px] font-bold text-slate-200">{source.title}</span>
+                                                                            <span className="truncate text-[9px] text-slate-500">{source.url ? new URL(source.url).hostname : 'Fuente local'}</span>
+                                                                        </div>
+                                                                        <ExternalLink className="ml-auto h-3 w-3 text-slate-700" />
+                                                                    </a>
+                                                                ))}
+                                                                {message.sources.length > 3 && (
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setShowAllSources(index)}
+                                                                        className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-[11px] font-black text-slate-400 shadow-sm transition-all hover:bg-white/10 hover:text-white"
+                                                                    >
+                                                                        +{message.sources.length - 3} MÁS
+                                                                    </button>
+                                                                )}
+                                                            </div>
                                                         </div>
-                                                        <div className="flex flex-wrap gap-3">
-                                                            {message.sources.slice(0, 3).map((source, sourceIndex) => (
-                                                                <a
-                                                                    key={sourceIndex}
-                                                                    href={source.url}
-                                                                    target="_blank"
-                                                                    rel="noopener noreferrer"
-                                                                    className="flex max-w-[220px] items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.03] p-2.5 shadow-sm transition-all hover:border-indigo-500/30 hover:bg-indigo-500/10"
-                                                                >
-                                                                    <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-lg bg-indigo-500/10 text-[10px] font-bold text-indigo-400 shadow-inner transition-all hover:bg-indigo-600 hover:text-white">
-                                                                        {sourceIndex + 1}
-                                                                    </div>
-                                                                    <div className="flex min-w-0 flex-col">
-                                                                        <span className="truncate text-[11px] font-bold text-slate-200">{source.title}</span>
-                                                                        <span className="truncate text-[9px] text-slate-500">{source.url ? new URL(source.url).hostname : 'Fuente local'}</span>
-                                                                    </div>
-                                                                    <ExternalLink className="ml-auto h-3 w-3 text-slate-700" />
-                                                                </a>
-                                                            ))}
-                                                            {message.sources.length > 3 && (
-                                                                <button
-                                                                    type="button"
-                                                                    onClick={() => setShowAllSources(index)}
-                                                                    className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-2.5 text-[11px] font-black text-slate-400 shadow-sm transition-all hover:bg-white/10 hover:text-white"
-                                                                >
-                                                                    +{message.sources.length - 3} MÁS
-                                                                </button>
+                                                    )}
+
+                                                    <div className="relative group">
+                                                        <div className="prose prose-invert max-w-none">
+                                                            {/* Mostrar tres puntos mientras está en streaming y no hay contenido */}
+                                                            {message.isStreaming && !message.content && !message.isError ? (
+                                                                <div className="flex items-center gap-1 py-2.5">
+                                                                    <span className="block w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                                                                    <span className="block w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                                                                    <span className="block w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                                                                </div>
+                                                            ) : message.isStreaming && message.content ? (
+                                                                <StreamingText text={message.content} onComplete={() => markStreamingComplete(index)} />
+                                                            ) : (
+                                                                <FormattedText text={message.content} />
                                                             )}
                                                         </div>
-                                                    </div>
-                                                )}
-
-                                                <div className="relative group">
-                                                    <div className="absolute -left-14 top-0 hidden h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 shadow-lg shadow-indigo-600/20 sm:flex">
-                                                        <Bot className="h-5 w-5 text-white" />
-                                                    </div>
-                                                    <div className="prose prose-invert max-w-none">
-                                                        {message.isStreaming ? (
-                                                            <StreamingText text={message.content} onComplete={() => markStreamingComplete(index)} />
-                                                        ) : (
-                                                            <FormattedText text={message.content} />
-                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -289,36 +334,36 @@ function App() {
                     </div>
                 )}
 
-                <div className="border-t border-white/5 bg-gradient-to-t from-[#0A0A0A] via-[#0A0A0A] to-transparent px-6 py-10">
-                    <div className="mx-auto max-w-3xl">
+                <div className="sticky bottom-0 border-t border-white/5 bg-[#0A0A0A]/95 px-4 py-3 backdrop-blur-sm">
+                    <div className="mx-auto max-w-2xl">
                         {apiError && (
-                            <div className="mb-4 rounded-2xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
+                            <div className="mb-2 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200">
                                 {apiError}
                             </div>
                         )}
                         <form
                             onSubmit={handleSearch}
-                            className="relative flex items-center rounded-3xl border border-white/10 bg-[#1A1A1A] p-2 shadow-[0_20px_50px_rgba(0,0,0,0.5)] transition-all duration-500 focus-within:border-indigo-500/40 focus-within:ring-8 focus-within:ring-indigo-500/5"
+                            className="relative flex h-11 items-center rounded-xl border border-white/10 bg-[#1A1A1A] shadow-lg transition-all duration-300 focus-within:border-indigo-500/50 focus-within:ring-3 focus-within:ring-indigo-500/10"
                         >
                             <input
                                 type="text"
                                 value={query}
                                 onChange={(event) => setQuery(event.target.value)}
-                                placeholder="Haz una pregunta de seguimiento..."
-                                className="flex-1 border-none bg-transparent px-6 py-4 text-base text-white outline-none placeholder:text-slate-600 focus:ring-0"
+                                placeholder="Escribe tu pregunta..."
+                                className="flex-1 border-none bg-transparent px-3 text-sm text-white outline-none placeholder:text-slate-500"
                             />
                             <button
                                 type="submit"
                                 disabled={loading || !query.trim()}
-                                className="group flex items-center gap-2 rounded-2xl bg-indigo-600 px-6 py-4 shadow-xl transition-all hover:bg-indigo-500 active:scale-95 disabled:bg-slate-800 disabled:text-slate-600"
+                                className={`flex h-9 w-9 items-center justify-center rounded-lg mr-1 transition-all ${loading || !query.trim()
+                                    ? 'opacity-40 cursor-not-allowed'
+                                    : 'bg-indigo-600 hover:bg-indigo-500'
+                                    }`}
                             >
                                 {loading ? (
-                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                    <Loader2 className="h-4 w-4 animate-spin text-white" />
                                 ) : (
-                                    <>
-                                        <span className="hidden text-sm font-bold tracking-wide text-white sm:block"></span>
-                                        <Send className="h-4 w-4 text-white transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" />
-                                    </>
+                                    <Send className="h-4 w-4 text-white" />
                                 )}
                             </button>
                         </form>

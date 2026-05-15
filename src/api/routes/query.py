@@ -1,6 +1,6 @@
 """Query endpoints for the RAG API."""
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 
 from src.api.models import QueryRequest, QueryResponse, ErrorResponse
 from src.errors.rag_errors import (
@@ -69,6 +69,7 @@ async def query(request: QueryRequest) -> QueryResponse:
             search_performed=result["search_performed"],
             top_local_score=result["top_local_score"],
             retrieved_documents=result["retrieved_documents"],
+            status=result.get("status", []),
         )
     except RAGRetrievalError as exc:
         raise HTTPException(

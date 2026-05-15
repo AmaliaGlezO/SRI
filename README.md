@@ -2,119 +2,219 @@
 
 Spanish Information Retrieval system using RAG (Retrieval-Augmented Generation) with hybrid search (LM + Vector) and automatic web search fallback.
 
-## Prerequisites
+## Características
+
+- **Búsqueda Híbrida**: Combina recuperación基于语言模型 (LM) y búsqueda vectorial
+- **RAG Pipeline**: Pipeline completo con LangChain para generación de respuestas
+- **Web Search Fallback**: Búsqueda automática en internet cuando la relevancia local es baja
+- **Pseudo-Relevance Feedback**: Expansión de consultas para mejorar recuperación
+- **Streaming en Tiempo Real**: Visualización del proceso de respuesta en tiempo real
+- **UI Moderna**: Interfaz de usuario estilo DeepSeek con indicadores de procesamiento
+
+## Requisitos
 
 - Python 3.10+
-- Node.js 18+ (for UI)
+- Node.js 18+ (para UI)
 - uv
-- 4GB+ RAM minimum (8GB+ recommended)
-- 2GB+ free disk space for model
+- 4GB+ RAM mínimo (8GB+ recomendado)
+- 2GB+ espacio libre en disco para el modelo
 
-## Installation
+## Instalación
 
 ```bash
-# Install Python dependencies
+# Instalar dependencias Python
 uv sync
 
-# Configure environment variables (optional - defaults work out of the box)
-cp .env.example .env
-
-# Install UI dependencies (optional)
-cd ui
-pnpm install 
-cd ..
+# Instalar dependencias UI (opcional)
+cd ui && pnpm install && cd ..
 ```
 
-## Running the Application
+## Ejecución
 
-### API Server
-
-```bash
-python api.py
-```
-
-The API will be available at:
-
-- API: <http://localhost:8000>
-- Documentation: <http://localhost:8000/docs>
-- Health Check: <http://localhost:8000/health>
-
-### Web UI
+### Servidor API
 
 ```bash
-# Terminal 1: Start the API server
+# Terminal 1: Iniciar API
 uv run api.py
-
-# Terminal 2: Start the UI
-cd ui
-npm run dev
 ```
 
-The UI will be available at: <http://localhost:5173>
+La API estará disponible en:
+- API: http://localhost:8000
+- Documentación: http://localhost:8000/docs
+- Health Check: http://localhost:8000/health
 
-## Configuration
+### Interfaz Web
 
-The system can be configured via environment variables in the `.env` file. Copy `.env.example` to `.env` and adjust values as needed.
+```bash
+# Terminal 2: Iniciar UI
+cd ui && npm run dev
+```
 
-### Environment Variables
+La UI estará disponible en: http://localhost:5173
 
-**Model Configuration**
+## Variables de Entorno
 
-- `MODEL_PATH`: Path to model file (empty = use default TinyLlama, will download if missing)
-- `MODEL_TEMPERATURE`: LLM sampling temperature (default: 0.3)
-- `MODEL_MAX_TOKENS`: Maximum tokens to generate (default: 2048)
-- `MODEL_N_CTX`: Context window size (default: 2048)
-- `MODEL_N_THREADS`: Number of CPU threads (default: auto-detect)
-- `MODEL_VERBOSE`: Enable verbose LLM output (default: false)
-- `USE_GPU`: Enable GPU acceleration (default: false)
+Copia `.env.example` a `.env` y ajusta los valores según necesidad.
 
-**RAG Configuration**
+### Configuración del Modelo
 
-- `RAG_RELEVANCE_THRESHOLD`: Threshold for triggering web search (0.0-1.0, default: 0.4)
-- `RAG_ENABLE_PRF`: Enable Pseudo-Relevance Feedback (default: true)
-- `RAG_PRF_K`: Number of top documents for PRF (default: 5)
-- `RAG_PRF_TERMS`: Number of terms to expand (default: 10)
-- `RAG_LM_RETRIEVER_WEIGHT`: Weight for LM retriever (default: 0.5)
-- `RAG_VECTOR_RETRIEVER_WEIGHT`: Weight for vector retriever (default: 0.5)
-- `RAG_RETRIEVER_K`: Number of documents to retrieve (default: 5)
+| Variable | Descripción | Por Defecto |
+|----------|-------------|-------------|
+| `MODEL_PATH` | Ruta al archivo del modelo (vacío = descargar modelo por defecto) | "" |
+| `MODEL_TEMPERATURE` | Temperatura de muestreo LLM | 0.3 |
+| `MODEL_MAX_TOKENS` | Máximo de tokens a generar | 2048 |
+| `MODEL_N_CTX` | Tamaño de ventana de contexto | 2048 |
+| `MODEL_N_THREADS` | Hilos CPU (vacío = auto-detectar) | auto |
+| `MODEL_VERBOSE` | Salida verbose del LLM | false |
+| `GGML_BACKEND` | Backend (cpu/cuda/metal) | cpu |
 
-**Vector DB Configuration**
+### Configuración RAG
 
-- `VECTOR_DB_COLLECTION_NAME`: Chroma collection name (default: sri_documents_transformer)
-- `VECTOR_DB_PERSIST_DIR`: Directory for vector store persistence (default: indexes/chroma_langchain)
-- `VECTOR_DB_TOP_K`: Number of results for vector search (default: 10)
+| Variable | Descripción | Por Defecto |
+|----------|-------------|-------------|
+| `RAG_RELEVANCE_THRESHOLD` | Umbral para activar búsqueda web (0.0-1.0) | 0.4 |
+| `RAG_ENABLE_PRF` | Habilitar Pseudo-Relevance Feedback | true |
+| `RAG_PRF_K` | Número de documentos top para PRF | 5 |
+| `RAG_PRF_TERMS` | Número de términos para expansión | 10 |
+| `RAG_LM_RETRIEVER_WEIGHT` | Peso del retriever LM (0.0-1.0) | 0.5 |
+| `RAG_VECTOR_RETRIEVER_WEIGHT` | Peso del retriever vector (0.0-1.0) | 0.5 |
+| `RAG_RETRIEVER_K` | Número de documentos a recuperar | 5 |
+| `RAG_MAX_DOC_CHARS` | Máximo caracteres por documento | 500 |
 
-**Web Search Configuration**
+### Configuración Vector DB
 
-- `WEB_SEARCH_MAX_RESULTS`: Maximum web search results (default: 5)
-- `WEB_SEARCH_REGION`: Search region (default: es-es)
-- `WEB_SEARCH_TIME`: Time filter (default: y)
+| Variable | Descripción | Por Defecto |
+|----------|-------------|-------------|
+| `VECTOR_DB_COLLECTION_NAME` | Nombre de colección Chroma | sri_documents_transformer |
+| `VECTOR_DB_PERSIST_DIR` | Directorio de persistencia | indexes/chroma_langchain |
+| `VECTOR_DB_TOP_K` | Número de resultados para búsqueda vectorial | 10 |
 
-**API Configuration**
+### Configuración Web Search
 
-- `API_HOST`: API server host (default: 0.0.0.0)
-- `API_PORT`: API server port (default: 8000)
-- `API_CORS_ORIGINS`: CORS allowed origins (default: *)
+| Variable | Descripción | Por Defecto |
+|----------|-------------|-------------|
+| `WEB_SEARCH_MAX_RESULTS` | Máximo de resultados web | 5 |
+| `WEB_SEARCH_REGION` | Región de búsqueda (es-es) | es-es |
+| `WEB_SEARCH_TIME` | Filtro temporal (y = año) | y |
 
-## Adding Documents
+### Configuración API
 
-Documents are stored in the `data/` directory. The system automatically indexes them on startup.
+| Variable | Descripción | Por Defecto |
+|----------|-------------|-------------|
+| `API_HOST` | Host del servidor API | 0.0.0.0 |
+| `API_PORT` | Puerto del servidor API | 8000 |
+| `API_CORS_ORIGINS` | Orígenes CORS permitidos | * |
 
-## Project Structure
+### Configuración de Scraping
+
+| Variable | Descripción | Por Defecto |
+|----------|-------------|-------------|
+| `INDEX_LANGUAGE` | Idioma para indexación | spanish |
+| `USER_AGENT` | User-Agent para requests | (Chrome latest) |
+| `ROBOTSTXT_OBEY` | Respetar robots.txt | True |
+| `DEPTH_LIMIT` | Profundidad máxima de scrapeo | 3 |
+| `CONCURRENT_REQUESTS` | Requests concurrentes | 8 |
+
+## API Endpoints
+
+### Query
+
+```bash
+# Con streaming (recomendado)
+POST /api/query/stream
+
+# Sin streaming
+POST /api/query
+```
+
+Cuerpo de la petición:
+```json
+{
+  "query": "¿Cuál es el mejor móvil de 2024?",
+  "use_rag": true,
+  "top_k": 5,
+  "use_prf": true,
+  "use_internet_search": true,
+  "temperature": 0.3,
+  "relevance_threshold": 0.4,
+  "max_doc_chars": 500
+}
+```
+
+### Indexing
+
+```bash
+POST /api/indexing
+```
+
+### Health
+
+```bash
+GET /api/health
+```
+
+## Estructura del Proyecto
 
 ```
 SRI/
 ├── src/
-│   ├── config.py              # Centralized configuration
-│   ├── api/                   # FastAPI application
-│   ├── generator/             # LLM wrapper
-│   ├── indexing/              # Document indexing
-│   ├── rag/                   # RAG pipeline
-│   ├── retrieval/             # Retrieval components
-│   ├── search_internet/       # Web search
-│   ├── utils/                 # Utilities
-│   └── vector_db/             # Vector database
-├── ui/                        # React web interface
-├── data/                      # Document storage
-├── indexes/                   # Index storage
-└── models/                    # Model files
+│   ├── config.py              # Configuración centralizada
+│   ├── api/                   # Aplicación FastAPI
+│   │   ├── app.py            # App principal
+│   │   ├── server.py         # Servidor
+│   │   ├── routes/           # Endpoints
+│   │   └── models.py         # Modelos Pydantic
+│   ├── rag/                   # Pipeline RAG
+│   ├── retrieval/             # Componentes de recuperación
+│   ├── vector_db/             # Base de datos vectorial
+│   ├── indexing/             # Indexación de documentos
+│   ├── generator/            # Wrapper del LLM
+│   ├── search_internet/      # Búsqueda web
+│   └── extract_data/         # Scraping de datos
+├── ui/                        # Interfaz React
+├── data/                      # Almacenamiento de documentos
+├── indexes/                   # Índices guardados
+├── models/                    # Archivos del modelo
+├── logs/                      # Logs del sistema
+├── .env                       # Variables de entorno
+└── README.md
+```
+
+## Agregar Documentos
+
+Los documentos se almacenan en el directorio `data/`. El sistema los indexa automáticamente al iniciar.
+
+Formatos soportados: JSON, texto plano
+
+Ejemplo de documento JSON:
+```json
+{
+  "title": "Título del artículo",
+  "url": "https://ejemplo.com",
+  "content": "Contenido del artículo...",
+  "source": "xataka"
+}
+```
+
+## Desarrollo
+
+### Iniciar en modo desarrollo
+
+```bash
+# API
+uv run api.py
+
+# UI
+cd ui && npm run dev
+```
+
+### Construir para producción
+
+```bash
+# UI
+cd ui && npm run build
+```
+
+## Licencia
+
+MIT

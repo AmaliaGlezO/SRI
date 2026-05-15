@@ -1,174 +1,120 @@
-# SRI - Sistema de Recuperación de Información
+# SRI RAG System
 
-Sistema de Retrieval-Augmented Generation (RAG) con búsqueda híbrida y scraping de artículos tecnológicos.
+Spanish Information Retrieval system using RAG (Retrieval-Augmented Generation) with hybrid search (LM + Vector) and automatic web search fallback.
 
-## Requisitos
+## Prerequisites
 
-- Docker y Docker Compose
-- Make
+- Python 3.10+
+- Node.js 18+ (for UI)
+- uv
+- 4GB+ RAM minimum (8GB+ recommended)
+- 2GB+ free disk space for model
 
----
-
-## Inicio Rápido
-
-```bash
-# 1. Construir imagen Docker
-make build
-
-# 2. Iniciar servicios base (API + Chroma + UI)
-make up
-```
-
-**Servicios disponibles:**
-- API: http://localhost:8000
-- UI: http://localhost:5173
-- Chroma: http://localhost:8001
-
----
-
-## Pipeline Completo (Paso a Paso)
-
-### Paso 1: Scraping
+## Installation
 
 ```bash
-make crawl
+# Install Python dependencies
+uv sync
+
+# Configure environment variables (optional - defaults work out of the box)
+cp .env.example .env
+
+# Install UI dependencies (optional)
+cd ui
+pnpm install 
+cd ..
 ```
 
-Ejecuta los spiders de Scrapy para obtener artículos de Xataka (PC y Mobile). Los artículos se guardan en `data/*.jsonl`.
+## Running the Application
 
-### Paso 2: Construcción de Índices
+### API Server
 
 ```bash
-make vector-index
+python api.py
 ```
 
-Construye tres índices:
-- **InvertedIndex**: Índice invertivo con TF-IDF (en `indexes/index/`)
-- **LM Retriever**: Modelo de lenguaje con Dirichlet smoothing (en `indexes/lm/`)
-- **Vector Store**: Embeddings con HuggingFace Transformers (`paraphrase-multilingual-MiniLM-L12-v2`) en Chroma (en `indexes/vector_store/` y `indexes/chroma/`)
+The API will be available at:
 
-### Paso 3: Consulta
+- API: <http://localhost:8000>
+- Documentation: <http://localhost:8000/docs>
+- Health Check: <http://localhost:8000/health>
 
-**Sin generación (solo retrieval):**
-```bash
-make query
-```
-
-**Con generación RAG (usa LLM local):**
-```bash
-make rag
-```
-
-### Paso 4: Tests
+### Web UI
 
 ```bash
-make test
+# Terminal 1: Start the API server
+uv run api.py
+
+# Terminal 2: Start the UI
+cd ui
+npm run dev
 ```
 
----
+The UI will be available at: <http://localhost:5173>
 
-## Variables de Entorno
+## Configuration
 
-### Hardware
+The system can be configured via environment variables in the `.env` file. Copy `.env.example` to `.env` and adjust values as needed.
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `GGML_BACKEND` | `cpu` | Backend para LLM: `cpu`, `cuda`, `metal` |
+### Environment Variables
 
-```bash
-# Usar GPU NVIDIA
-GGML_BACKEND=cuda make up
+**Model Configuration**
 
-# Usar Apple Silicon
-GGML_BACKEND=metal make up
-```
+- `MODEL_PATH`: Path to model file (empty = use default TinyLlama, will download if missing)
+- `MODEL_TEMPERATURE`: LLM sampling temperature (default: 0.3)
+- `MODEL_MAX_TOKENS`: Maximum tokens to generate (default: 2048)
+- `MODEL_N_CTX`: Context window size (default: 2048)
+- `MODEL_N_THREADS`: Number of CPU threads (default: auto-detect)
+- `MODEL_VERBOSE`: Enable verbose LLM output (default: false)
+- `USE_GPU`: Enable GPU acceleration (default: false)
 
-### Chroma (Base de Datos Vectorial)
+**RAG Configuration**
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `CHROMA_HOST` | `chroma` | Host del servidor Chroma |
-| `CHROMA_PORT` | `8000` | Puerto del servidor Chroma |
+- `RAG_RELEVANCE_THRESHOLD`: Threshold for triggering web search (0.0-1.0, default: 0.4)
+- `RAG_ENABLE_PRF`: Enable Pseudo-Relevance Feedback (default: true)
+- `RAG_PRF_K`: Number of top documents for PRF (default: 5)
+- `RAG_PRF_TERMS`: Number of terms to expand (default: 10)
+- `RAG_LM_RETRIEVER_WEIGHT`: Weight for LM retriever (default: 0.5)
+- `RAG_VECTOR_RETRIEVER_WEIGHT`: Weight for vector retriever (default: 0.5)
+- `RAG_RETRIEVER_K`: Number of documents to retrieve (default: 5)
 
-### Python
+**Vector DB Configuration**
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `PYTHONUNBUFFERED` | `1` | Salida sin buffer |
-| `LOG_LEVEL` | `INFO` | Nivel de logs |
+- `VECTOR_DB_COLLECTION_NAME`: Chroma collection name (default: sri_documents_transformer)
+- `VECTOR_DB_PERSIST_DIR`: Directory for vector store persistence (default: indexes/chroma_langchain)
+- `VECTOR_DB_TOP_K`: Number of results for vector search (default: 10)
 
-### Modelo LLM
+**Web Search Configuration**
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `MODEL_PATH` | (vacío) | Ruta al modelo GGUF |
-| `MODEL_TEMPERATURE` | `0.3` | Temperatura de generación |
-| `MODEL_MAX_TOKENS` | `2048` | Máx. tokens a generar |
-| `MODEL_N_CTX` | `2048` | Tamaño de contexto |
-| `MODEL_N_THREADS` | (auto) | Hilos de CPU |
+- `WEB_SEARCH_MAX_RESULTS`: Maximum web search results (default: 5)
+- `WEB_SEARCH_REGION`: Search region (default: es-es)
+- `WEB_SEARCH_TIME`: Time filter (default: y)
 
-### RAG
+**API Configuration**
 
-| Variable | Default | Descripción |
-|----------|---------|-------------|
-| `RAG_RELEVANCE_THRESHOLD` | `0.4` | Umbral de relevancia |
-| `RAG_ENABLE_PRF` | `true` | Habilitar Pseudo-Relevance Feedback |
-| `RAG_MAX_DOC_CHARS` | `500` | Máx. caracteres por documento en el prompt |
-| `RAG_PRF_K` | `5` | Docs para PRF |
-| `RAG_RETRIEVER_K` | `5` | Docs a recuperar |
+- `API_HOST`: API server host (default: 0.0.0.0)
+- `API_PORT`: API server port (default: 8000)
+- `API_CORS_ORIGINS`: CORS allowed origins (default: *)
 
----
+## Adding Documents
 
-## Todos los Comandos
+Documents are stored in the `data/` directory. The system automatically indexes them on startup.
 
-| Comando | Descripción |
-|---------|-------------|
-| `make help` | Mostrar ayuda |
-| `make build` | Construir imagen Docker |
-| `make up` | Iniciar API + Chroma + UI |
-| `make down` | Detener servicios |
-| `make rebuild` | Reconstruir y reiniciar |
-| `make api` | Iniciar solo API |
-| `make ui` | Iniciar solo UI |
-| `make crawl` | Ejecutar Scrapy spiders |
-| `make index` | Construir índice invertido |
-| `make vector-index` | Construir índices completos |
-| `make query` | CLI búsqueda sin RAG |
-| `make rag` | CLI búsqueda con RAG |
-| `make test` | Ejecutar tests |
-| `make logs` | Ver todos los logs |
-| `make logs-api` | Ver logs de API |
-| `make logs-chroma` | Ver logs de Chroma |
-| `make logs-crawl` | Ver logs de crawl |
-| `make ps` | Ver estado de servicios |
-| `make clean` | Limpiar contenedores y datos |
-
----
-
-## Estructura de Archivos
+## Project Structure
 
 ```
 SRI/
-├── main.py              # CLI principal
-├── docker-compose.yml   # Orquestación
-├── Dockerfile           # Imagen Python
-├── Makefile             # Comandos
-├── .env                 # Variables de entorno
-│
-├── ui/                  # Interfaz React
-│   ├── Dockerfile
-│   └── nginx.conf
-│
 ├── src/
-│   ├── extract_data/    # Scrapy spiders
-│   ├── indexing/        # InvertedIndex, TextNormalizer
-│   ├── retrieval/       # LMRetriever, QueryProcessor
-│   ├── vector_db/       # BasicEmbeddings, VectorStore
-│   ├── generator/       # LocalLLM
-│   └── rag/             # GenerativeAnswerGenerator
-│
-├── data/                # Artículos (JSONL)
-├── indexes/             # Índices
-├── logs/                # Logs de crawl
-└── models/              # Modelos LLM
-```
+│   ├── config.py              # Centralized configuration
+│   ├── api/                   # FastAPI application
+│   ├── generator/             # LLM wrapper
+│   ├── indexing/              # Document indexing
+│   ├── rag/                   # RAG pipeline
+│   ├── retrieval/             # Retrieval components
+│   ├── search_internet/       # Web search
+│   ├── utils/                 # Utilities
+│   └── vector_db/             # Vector database
+├── ui/                        # React web interface
+├── data/                      # Document storage
+├── indexes/                   # Index storage
+└── models/                    # Model files

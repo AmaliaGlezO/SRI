@@ -59,6 +59,7 @@ MODEL_N_THREADS: Optional[int] = _get_env_int(
     "MODEL_N_THREADS", None
 )  # None = auto-detect
 MODEL_VERBOSE = _get_env_bool("MODEL_VERBOSE", False)
+USE_GPU = _get_env_bool("USE_GPU", False)
 
 # ============================================================================
 # RAG CONFIGURATION

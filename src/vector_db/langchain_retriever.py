@@ -2,7 +2,7 @@ from typing import List
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 
 class LangChainVectorRetriever(BaseRetriever):
     """
@@ -22,8 +22,8 @@ class LangChainVectorRetriever(BaseRetriever):
         
         documents = []
         for doc, score in results:
-            # Ensure score is in metadata
-            doc.metadata["score"] = score
+            # Ensure score is in metadata and within [0, 1] range
+            doc.metadata["score"] = max(0.0, min(1.0, float(score)))
             documents.append(doc)
         
         return documents

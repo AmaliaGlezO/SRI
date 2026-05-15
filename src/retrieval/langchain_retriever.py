@@ -4,10 +4,12 @@ from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
 from src.retrieval.lm_retriever import LMRetriever
 
+
 class LangChainLMRetriever(BaseRetriever):
     """
     A LangChain wrapper for the custom LMRetriever.
     """
+
     retriever: LMRetriever
     k: int = 5
 
@@ -19,7 +21,7 @@ class LangChainLMRetriever(BaseRetriever):
     ) -> List[Document]:
         # Use the underlying LMRetriever to get results
         results = self.retriever.retrieve(query, top_k=self.k)
-        
+
         documents = []
         for res in results:
             # Convert dict results to LangChain Document objects
@@ -30,9 +32,10 @@ class LangChainLMRetriever(BaseRetriever):
                     "title": res.get("title"),
                     "url": res.get("url"),
                     "score": res.get("score"),
-                    "rank": res.get("rank")
-                }
+                    "rank": res.get("rank"),
+                },
             )
+            doc.metadata["score"] = max(0.0, min(1.0, float(score)))
             documents.append(doc)
-        
+
         return documents

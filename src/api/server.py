@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-"""Entry point for starting the SRI RAG API server."""
 
 import logging
 import sys
@@ -15,12 +14,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def initialize_system(model_path):
+def initialize_system(model_path, force=False):
     """Initialize the SRI system components."""
     from src.indexing.indexer import TextNormalizer, InvertedIndex
     from src.indexing.storage import DocumentStore
     from src.retrieval.lm_retriever import LMRetriever
-    from src.vector_db.embeddings import get_embeddings
+    from src.vector_db.embeddings import get_embeddings, TfidfEmbeddings
     from src.vector_db.vector_store import VectorStore
     from src.rag.rag import RAGPipeline
 
@@ -31,11 +30,11 @@ def initialize_system(model_path):
     try:
         normalizer = TextNormalizer()
 
-        def get_or_create_system(force=False):
+        def get_or_create_system(force=force):
             """Load or create the hybrid retrieval system."""
             lm_path = indexes_dir / "lm"
             index_path = indexes_dir / "index"
-            
+
             # LMRetriever
             if not force and lm_path.exists():
                 logger.info("Loading existing LM retriever...")
@@ -55,7 +54,16 @@ def initialize_system(model_path):
 
             # Embeddings & Vector Store
             logger.info("Initializing embeddings and vector store...")
-            embeddings = get_embeddings()
+            embeddings_path = indexes_dir / "vector_store"
+            
+            # embeddings = get_embeddings()
+            if (embeddings_path / "tfidf_embeddings.pkl").exists():
+                logger.info("Loading existing TF-IDF embeddings model...")
+                embeddings = TfidfEmbeddings.load(embeddings_path)
+            else:
+                logger.info("Initializing new TF-IDF embeddings model...")
+                embeddings = TfidfEmbeddings(normalizer=normalizer)
+                
             vector_store = VectorStore(embeddings=embeddings)
 
             if force or vector_store.stats()["num_documents"] == 0:
@@ -70,13 +78,17 @@ def initialize_system(model_path):
                     texts.append(f"{doc.get('title', '')} {doc.get('content', '')}")
                     metadatas.append(doc)
 
+                if isinstance(embeddings, TfidfEmbeddings):
+                    embeddings.fit(docs.all())
+                    embeddings.save(embeddings_path)
+                
                 vector_store.setup(doc_ids, texts, metadatas, reset=True)
 
             return lm, vector_store
 
         # Initialize both retrieval systems
         logger.info("Creating retrieval systems...")
-        lm_retriever, vector_store = get_or_create_system(force=False)
+        lm_retriever, vector_store = get_or_create_system(force=force)
 
         # Initialize LangChain RAG Pipeline
         logger.info("Initializing RAG pipeline...")
@@ -127,7 +139,9 @@ def main(model_path):
     """Main entry point."""
     try:
         # Initialize system
-        rag, get_or_create_system, lm_retriever, vector_store = initialize_system(model_path)
+        rag, get_or_create_system, lm_retriever, vector_store = initialize_system(
+            model_path, force=False
+        )
 
         # Initialize API
         from src.api.app import app, init_api

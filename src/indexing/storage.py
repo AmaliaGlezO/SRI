@@ -133,6 +133,10 @@ class DocumentStore:
         """Yield every document."""
         yield from self._docs.values()
 
+    def __iter__(self) -> Iterator[dict]:
+        """Allow iterating over the store directly."""
+        return iter(self._docs.values())
+
     def __len__(self) -> int:
         return len(self._docs)
 

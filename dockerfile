@@ -43,4 +43,4 @@ for group, names in packages.items():
             zf.extractall(out_dir)
 PY
 
-CMD ["python", "main.py"]
+CMD ["uv", "run", "python", "api.py"]

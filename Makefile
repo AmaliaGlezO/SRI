@@ -30,7 +30,7 @@ build:
 	docker-compose build --no-cache
 
 up:
-	docker-compose up -d api chroma
+	docker-compose up -d api chroma ui
 	@echo ""
 	@echo "Servicios iniciados:"
 	@echo "  - API:   http://localhost:8000"

@@ -113,6 +113,7 @@ GGML_BACKEND=metal make up
 |----------|---------|-------------|
 | `RAG_RELEVANCE_THRESHOLD` | `0.4` | Umbral de relevancia |
 | `RAG_ENABLE_PRF` | `true` | Habilitar Pseudo-Relevance Feedback |
+| `RAG_MAX_DOC_CHARS` | `500` | Máx. caracteres por documento en el prompt |
 | `RAG_PRF_K` | `5` | Docs para PRF |
 | `RAG_RETRIEVER_K` | `5` | Docs a recuperar |
 

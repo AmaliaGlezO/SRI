@@ -1,5 +1,3 @@
-
-
 import os
 from pathlib import Path
 from typing import Optional
@@ -47,8 +45,8 @@ DATA_DIR = BASE_DIR / "data"
 
 # Default model URL for HuggingFace download
 DEFAULT_MODEL_HF_REPO = "TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF"
-DEFAULT_MODEL_FILE = "TinyLlama-1.1B-Chat-v1.0.Q4_K_M.gguf"
-DEFAULT_MODEL_URL = f"https://huggingface.co/{DEFAULT_MODEL_HF_REPO}/resolve/main/{DEFAULT_MODEL_FILE}"
+DEFAULT_MODEL_FILE = "TinyLlama-1.1B-Chat-v1.0-Q4_K_M.gguf"
+DEFAULT_MODEL_URL = f"https://huggingface.co/{DEFAULT_MODEL_HF_REPO}/resolve/main/{DEFAULT_MODEL_FILE}".lower()
 
 # Model path - if empty, will use default and download if needed
 MODEL_PATH: Optional[str] = _get_env_str("MODEL_PATH", "")
@@ -57,7 +55,9 @@ MODEL_PATH: Optional[str] = _get_env_str("MODEL_PATH", "")
 MODEL_TEMPERATURE = _get_env_float("MODEL_TEMPERATURE", 0.3)
 MODEL_MAX_TOKENS = _get_env_int("MODEL_MAX_TOKENS", 2048)
 MODEL_N_CTX = _get_env_int("MODEL_N_CTX", 2048)
-MODEL_N_THREADS: Optional[int] = _get_env_int("MODEL_N_THREADS", None)  # None = auto-detect
+MODEL_N_THREADS: Optional[int] = _get_env_int(
+    "MODEL_N_THREADS", None
+)  # None = auto-detect
 MODEL_VERBOSE = _get_env_bool("MODEL_VERBOSE", False)
 
 # ============================================================================
@@ -74,6 +74,7 @@ RAG_PRF_TERMS = _get_env_int("RAG_PRF_TERMS", 10)
 
 # Retriever weights (LM vs Vector)
 RAG_LM_RETRIEVER_WEIGHT = _get_env_float("RAG_LM_RETRIEVER_WEIGHT", 0.5)
+RAG_MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS", 500))
 RAG_VECTOR_RETRIEVER_WEIGHT = _get_env_float("RAG_VECTOR_RETRIEVER_WEIGHT", 0.5)
 
 # Number of documents to retrieve
@@ -83,7 +84,9 @@ RAG_RETRIEVER_K = _get_env_int("RAG_RETRIEVER_K", 5)
 # VECTOR DB CONFIGURATION
 # ============================================================================
 
-VECTOR_DB_COLLECTION_NAME = _get_env_str("VECTOR_DB_COLLECTION_NAME", "sri_documents_transformer")
+VECTOR_DB_COLLECTION_NAME = _get_env_str(
+    "VECTOR_DB_COLLECTION_NAME", "sri_documents_transformer"
+)
 VECTOR_DB_PERSIST_DIR = str((INDEXES_DIR / "chroma_langchain").absolute())
 VECTOR_DB_TOP_K = _get_env_int("VECTOR_DB_TOP_K", 10)
 

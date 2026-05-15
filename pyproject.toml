@@ -3,24 +3,23 @@ name = "sri"
 version = "0.1.0"
 description = "Sistema de Recuperación de Información — tech-news domain (mobile & PC)"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12, <3.14"
 dependencies = [
     "scrapy==2.14.1",
-    "bs4==0.0.2",
+    "beautifulsoup4>=4.12.0",
     "numpy==2.4.2",
-    "pandas==3.0.1",
+    "requests>=2.31.0",
     "nltk==3.9",
     "scikit-learn==1.6",
     "chromadb",
-    "onnxruntime<1.19.0",
+    "langchain-chroma",
     "llama-cpp-python>=0.3.0",
-    "tqdm>=4.67.3",
     "langchain>=1.2.10",
     "langchain-huggingface>=1.2.1",
     "langchain-community",
     "sentence-transformers",
     "emoji>=2.15.0",
-    "duckduckgo-search>=8.1.1",
+    "ddgs>=1.0.0",
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
     "pydantic>=2.0.0",

@@ -65,17 +65,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.exception_handler(ErrorResponse)
-async def response_error_handler(request:Request,exc:ErrorResponse):
-    """Handle ErrorResponse"""
-    logger.error(f"Error Response: {exc}")
-    return JSONResponse(
-        status_code=500,
-        content={
-            'error_type':exc.__class__.__name__,
-            "message":str(exc),
-        }
-    )
+
 
 @app.exception_handler(RAGError)
 async def rag_error_handler(request: Request, exc: RAGError):
@@ -183,6 +173,6 @@ async def root():
 
 
 
-app.include_router(query.router)
-app.include_router(indexing.router)
-app.include_router(health.router)
+app.include_router(query.router, prefix="/api")
+app.include_router(indexing.router, prefix="/api")
+app.include_router(health.router, prefix="/api")

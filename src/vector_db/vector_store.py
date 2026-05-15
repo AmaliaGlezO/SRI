@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from langchain_community.vectorstores import Chroma
+from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
 import numpy as np
 
@@ -30,6 +30,7 @@ class VectorStore:
             collection_name=self.COLLECTION_NAME,
             embedding_function=self._embeddings,
             persist_directory=self._persist_dir,
+            collection_metadata={"hnsw:space": "cosine"},
         )
 
     def setup(
@@ -49,6 +50,7 @@ class VectorStore:
                     collection_name=self.COLLECTION_NAME,
                     embedding_function=self._embeddings,
                     persist_directory=self._persist_dir,
+                    collection_metadata={"hnsw:space": "cosine"},
                 )
 
             print(f"[VectorStore] Adding {len(doc_ids)} documents to Chroma...")

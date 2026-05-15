@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, List, Dict
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.prompts import PromptTemplate
 from langchain_community.llms import LlamaCpp
 
 from src.config import (
@@ -13,6 +13,7 @@ from src.config import (
     MODEL_VERBOSE,
     RAG_ENABLE_PRF,
     RAG_LM_RETRIEVER_WEIGHT,
+    RAG_MAX_DOC_CHARS,
     RAG_PRF_K,
     RAG_PRF_TERMS,
     RAG_RELEVANCE_THRESHOLD,
@@ -34,20 +35,26 @@ from src.vector_db.langchain_retriever import LangChainVectorRetriever
 from src.search_internet.searcher import WebSearcher
 
 
-class EnsembleRetriever:
+from langchain_core.retrievers import BaseRetriever
+from langchain_core.callbacks import CallbackManagerForRetrieverRun
+
+class EnsembleRetriever(BaseRetriever):
     """Simple ensemble retriever combining LM and vector retrievers."""
+    retrievers: List[Any]
+    weights: List[float]
 
-    def __init__(self, retrievers: List[Any], weights: List[float]) -> None:
-        self.retrievers = retrievers
-        self.weights = weights
+    class Config:
+        arbitrary_types_allowed = True
 
-    def get_relevant_documents(self, query: str) -> List[Any]:
+    def _get_relevant_documents(
+        self, query: str, *, run_manager: CallbackManagerForRetrieverRun
+    ) -> List[Any]:
         """Combine results from multiple retrievers with weighted scoring."""
         all_docs = {}  # {content_hash: (doc, weighted_score)}
         
         for retriever, weight in zip(self.retrievers, self.weights):
             try:
-                docs = retriever.get_relevant_documents(query)
+                docs = retriever.invoke(query)
                 for i, doc in enumerate(docs):
                     # Assign score based on retriever rank and weight
                     score = (1.0 / (i + 1)) * weight  # Rank-based scoring
@@ -84,17 +91,21 @@ class RAGPipeline:
         try:
             # Initialize LLM
             self.vector_store = vector_store
-            self.relevance_threshold = relevance_threshold if relevance_threshold is not None else RAG_RELEVANCE_THRESHOLD
+            self.relevance_threshold = (
+                relevance_threshold
+                if relevance_threshold is not None
+                else RAG_RELEVANCE_THRESHOLD
+            )
             self.web_searcher = WebSearcher()
             self.enable_prf = enable_prf if enable_prf is not None else RAG_ENABLE_PRF
             self.prf_k = prf_k if prf_k is not None else RAG_PRF_K
             self.prf_terms = prf_terms if prf_terms is not None else RAG_PRF_TERMS
-            
             # Use default model path if not provided
-            if model_path is None:
+            if not model_path:
                 from src.utils.model_downloader import ModelDownloader
+
                 model_path = str(ModelDownloader.ensure_model_exists())
-            
+
             self.llm = LlamaCpp(
                 model_path=model_path,
                 temperature=MODEL_TEMPERATURE,
@@ -108,7 +119,9 @@ class RAGPipeline:
             self.raw_lm_retriever = retriever_lm
 
             #  Initialize Retrievers
-            self.lm_retriever = LangChainLMRetriever(retriever=retriever_lm, k=RAG_RETRIEVER_K)
+            self.lm_retriever = LangChainLMRetriever(
+                retriever=retriever_lm, k=RAG_RETRIEVER_K
+            )
             self.vector_retriever = LangChainVectorRetriever(
                 vectorstore=vector_store._vectorstore, k=RAG_RETRIEVER_K
             )
@@ -130,7 +143,7 @@ Pregunta del usuario: {question}
 Responde en espanol usando solo la informacion proporcionada en el contexto. Si la informacion no esta disponible, indica que no hay suficiente informacion. y DETENTE
 
 Respuesta:"""
-            self.prompt = ChatPromptTemplate.from_template(template)
+            self.prompt = PromptTemplate.from_template(template)
 
             #  Build Chain
             self.chain = (
@@ -148,19 +161,40 @@ Respuesta:"""
             ) from exc
 
     def _format_docs(self, docs: List[Any]) -> str:
+        # Estimate available context window in characters
+        # Llama 2/3 context is n_ctx tokens. We leave 400 for instructions/query.
+        # Conservative estimate: 3 characters per token.
+        max_total_chars = (MODEL_N_CTX - 400) * 3
+        
+        # Calculate total characters if we don't truncate
+        total_untruncated_chars = sum(len(doc.page_content) for doc in docs)
+        
+        # Determine if we need to truncate
+        should_truncate = total_untruncated_chars > max_total_chars
+        
         formatted = []
         for i, doc in enumerate(docs, 1):
             title = doc.metadata.get("title", "Sin titulo")
-            formatted.append(
-                f"Documento {i}:\nTitulo: {title}\nContenido: {doc.page_content}"
-            )
+            
+            if should_truncate:
+                # Use environment variable limit per document
+                limit = RAG_MAX_DOC_CHARS
+                content = (
+                    doc.page_content[:limit] + "..."
+                    if len(doc.page_content) > limit
+                    else doc.page_content
+                )
+            else:
+                content = doc.page_content
+                
+            formatted.append(f"Documento {i}:\nTitulo: {title}\nContenido: {content}")
         return "\n\n".join(formatted)
 
     def answer(self, query: str, use_prf: bool = True) -> Dict[str, Any]:
         """
         Answer a query using the full LangChain RAG pipeline.
         If local results are not relevant, search the internet.
-        
+
         Parameters
         ----------
         query : str
@@ -211,7 +245,7 @@ Respuesta:"""
 
         # Get ensemble results as fallback or complement
         try:
-            local_docs = self.ensemble_retriever.get_relevant_documents(query)
+            local_docs = self.ensemble_retriever.invoke(query)
             print(f"[RAGPipeline] Retrieved {len(local_docs)} docs from ensemble")
         except Exception as exc:
             raise RAGRetrievalError("Failed to retrieve local documents.") from exc
@@ -248,17 +282,22 @@ Respuesta:"""
                 docs = internet_docs + local_docs
                 search_performed = True
 
+        print(f"[RAGPipeline] Formatting {len(docs)} documents for context...")
         context = self._format_docs(docs)
 
         try:
             if search_performed:
+                print(f"[RAGPipeline] Generating answer with internet search context...")
                 chain_input = {"context": context, "question": query}
                 answer_text = (self.prompt | self.llm | StrOutputParser()).invoke(
                     chain_input
                 )
             else:
+                print(f"[RAGPipeline] Generating answer with local ensemble context...")
                 answer_text = self.chain.invoke(query)
+            print(f"[RAGPipeline] Answer generated successfully")
         except Exception as exc:
+            print(f"[RAGPipeline] Answer generation failed: {exc}")
             raise RAGAnswerGenerationError("Failed to generate final answer.") from exc
 
         sources = []
@@ -279,7 +318,8 @@ Respuesta:"""
             "top_local_score": top_score,
             "retrieved_documents": [
                 {
-                    "title": d.metadata.get("title"),
+                    "title": d.metadata.get("title") or "Sin título",
+                    "url": d.metadata.get("url") or "",
                     "score": d.metadata.get("score", 0),
                     "source": d.metadata.get("source", "Local DB"),
                 }

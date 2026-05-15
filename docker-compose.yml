@@ -1,35 +1,13 @@
 services:
 
-  api:
-    build: .
+  ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
     ports:
-      - "8000:8000"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - CHROMA_HOST=chroma
-      - CHROMA_PORT=8000
-      - GGML_BACKEND=${GGML_BACKEND:-cpu}
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./models:/app/models
-      - ./indexes:/app/indexes
+      - "5173:80"
     depends_on:
-      - chroma
-    command: uv run python api.py
-
-  crawl:
-    build: .
-    volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
-      - ./indexes:/app/indexes
-    command: >
-      /bin/sh -c "
-        uv run scrapy crawl xataka_mobile > logs/xataka_mobile.log 2>&1 &
-        uv run scrapy crawl xataka_pc     > logs/xataka_pc.log 2>&1 &
-        wait && echo 'All spiders finished.'
-      "
+      - api
 
   index:
     build: .
@@ -118,11 +96,32 @@ services:
         uv run python -m pytest tests/test_rag.py -v
       "
 
-  ui:
-    build:
-      context: ./ui
-      dockerfile: Dockerfile
+  crawl:
+    build: .
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./indexes:/app/indexes
+    command: >
+      /bin/sh -c "
+        uv run scrapy crawl xataka_mobile > logs/xataka_mobile.log 2>&1 &
+        uv run scrapy crawl xataka_pc     > logs/xataka_pc.log 2>&1 &
+        wait && echo 'All spiders finished.'
+      "
+  api:
+    build: .
     ports:
-      - "5173:80"
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - GGML_BACKEND=${GGML_BACKEND:-cpu}
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./models:/app/models
+      - ./indexes:/app/indexes
     depends_on:
-      - api
+      - chroma
+    command: uv run python api.py

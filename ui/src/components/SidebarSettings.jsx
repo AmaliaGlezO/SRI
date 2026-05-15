@@ -134,7 +134,7 @@ export default function SidebarSettings({
 
                 {!useRag && (
                     <div className="rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-                        RAG está desactivado. Los ajustes avanzados quedan bloqueados hasta que lo actives.
+                        RAG está desactivado. Se usará el modelo generador sin contexto.
                     </div>
                 )}
             </div>

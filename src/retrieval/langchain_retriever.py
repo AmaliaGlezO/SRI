@@ -25,6 +25,7 @@ class LangChainLMRetriever(BaseRetriever):
         documents = []
         for res in results:
             # Convert dict results to LangChain Document objects
+            score = res.get("score", 0.0)
             doc = Document(
                 page_content=res.get("content_preview", ""),
                 metadata={

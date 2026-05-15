@@ -100,6 +100,7 @@ class RAGPipeline:
             self.enable_prf = enable_prf if enable_prf is not None else RAG_ENABLE_PRF
             self.prf_k = prf_k if prf_k is not None else RAG_PRF_K
             self.prf_terms = prf_terms if prf_terms is not None else RAG_PRF_TERMS
+            self.max_doc_chars = RAG_MAX_DOC_CHARS
             # Use default model path if not provided
             if not model_path:
                 from src.utils.model_downloader import ModelDownloader
@@ -140,7 +141,7 @@ Contexto:
 
 Pregunta del usuario: {question}
 
-Responde en espanol usando solo la informacion proporcionada en el contexto. Si la informacion no esta disponible, indica que no hay suficiente informacion. y DETENTE
+Responde en espanol usando solo la informacion proporcionada en el contexto. Es OBLIGATORIO incluir citaciones en el texto usando el formato [n] (por ejemplo, [1], [2]) para indicar de qué documento proviene la información. Si la informacion no esta disponible, indica que no hay suficiente informacion. y DETENTE
 
 Respuesta:"""
             self.prompt = PromptTemplate.from_template(template)
@@ -165,6 +166,7 @@ Respuesta:"""
         # Llama 2/3 context is n_ctx tokens. We leave 400 for instructions/query.
         # Conservative estimate: 3 characters per token.
         max_total_chars = (MODEL_N_CTX - 400) * 3
+        limit = self.max_doc_chars if self.max_doc_chars is not None else max_total_chars
         
         # Calculate total characters if we don't truncate
         total_untruncated_chars = sum(len(doc.page_content) for doc in docs)
@@ -177,8 +179,6 @@ Respuesta:"""
             title = doc.metadata.get("title", "Sin titulo")
             
             if should_truncate:
-                # Use environment variable limit per document
-                limit = RAG_MAX_DOC_CHARS
                 content = (
                     doc.page_content[:limit] + "..."
                     if len(doc.page_content) > limit
@@ -190,7 +190,17 @@ Respuesta:"""
             formatted.append(f"Documento {i}:\nTitulo: {title}\nContenido: {content}")
         return "\n\n".join(formatted)
 
-    def answer(self, query: str, use_prf: bool = True) -> Dict[str, Any]:
+    def answer(
+        self,
+        query: str,
+        use_rag: bool = True,
+        top_k: int | None = None,
+        use_prf: bool = True,
+        temperature: float | None = None,
+        relevance_threshold: float | None = None,
+        max_doc_chars: int | None = None,
+        use_internet_search: bool = True,
+    ) -> Dict[str, Any]:
         """
         Answer a query using the full LangChain RAG pipeline.
         If local results are not relevant, search the internet.
@@ -199,9 +209,31 @@ Respuesta:"""
         ----------
         query : str
             User query in Spanish
+        use_rag : bool
+            Whether to use the configurable RAG overrides
+        top_k : int, optional
+            Number of documents to retrieve
         use_prf : bool
             Whether to apply Pseudo-Relevance Feedback for query expansion
+        temperature : float, optional
+            LLM temperature
+        relevance_threshold : float, optional
+            RAG relevance threshold
+        max_doc_chars : int, optional
+            Max characters per document
+        use_internet_search : bool
+            Whether to allow internet fallback search
         """
+        # Overrides logic
+        effective_threshold = (
+            relevance_threshold if use_rag and relevance_threshold is not None else RAG_RELEVANCE_THRESHOLD
+        )
+        effective_top_k = top_k if use_rag and top_k is not None else RAG_RETRIEVER_K
+        self.max_doc_chars = max_doc_chars if use_rag and max_doc_chars is not None else RAG_MAX_DOC_CHARS
+        
+        if use_rag and temperature is not None and hasattr(self.llm, 'temperature'):
+            self.llm.temperature = temperature
+
         print(f"[RAGPipeline] Processing query: {query}")
 
         # Process query: normalize, extract filters, optional PRF
@@ -217,7 +249,7 @@ Respuesta:"""
         q_weights = processed_query.to_weights()
 
         # Apply Pseudo-Relevance Feedback if enabled
-        if self.enable_prf and use_prf:
+        if use_rag and self.enable_prf and use_prf:
             print(f"[RAGPipeline] Applying PRF for query expansion...")
             try:
                 q_weights_expanded = self.query_processor.apply_prf(
@@ -235,7 +267,7 @@ Respuesta:"""
         try:
             lm_results = self.raw_lm_retriever.retrieve(
                 q_weights,
-                top_k=RAG_RETRIEVER_K,
+                top_k=effective_top_k,
                 filters=processed_query.filters if processed_query.filters else None,
             )
             print(f"[RAGPipeline] Retrieved {len(lm_results)} docs from LM retriever")
@@ -246,6 +278,7 @@ Respuesta:"""
         # Get ensemble results as fallback or complement
         try:
             local_docs = self.ensemble_retriever.invoke(query)
+            local_docs = local_docs[:effective_top_k]
             print(f"[RAGPipeline] Retrieved {len(local_docs)} docs from ensemble")
         except Exception as exc:
             raise RAGRetrievalError("Failed to retrieve local documents.") from exc
@@ -265,9 +298,9 @@ Respuesta:"""
 
         search_performed = False
 
-        if top_score < self.relevance_threshold:
+        if use_rag and use_internet_search and top_score < effective_threshold:
             print(
-                f"[RAGPipeline] Local relevance ({top_score:.2f}) below threshold ({self.relevance_threshold}). Searching internet..."
+                f"[RAGPipeline] Local relevance ({top_score:.2f}) below threshold ({effective_threshold}). Searching internet..."
             )
             try:
                 internet_docs = self.web_searcher.search(processed_query.text)

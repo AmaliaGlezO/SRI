@@ -106,7 +106,7 @@ def initialize_system(model_path, force=False):
         raise
 
 
-def create_status_checker(lm_retriever, vector_store):
+def create_status_checker(rag, lm_retriever, vector_store):
     """Create a status checker function."""
 
     def check_status():
@@ -121,6 +121,7 @@ def create_status_checker(lm_retriever, vector_store):
                 "vector_store_available": vector_store is not None,
                 "lm_stats": lm_stats,
                 "vector_stats": vector_stats,
+                "model_info": rag.llm.model_path if hasattr(rag, 'llm') and hasattr(rag.llm, 'model_path') else "Llama 1.1B",
                 "message": "All systems operational",
             }
         except Exception as exc:
@@ -146,7 +147,7 @@ def main(model_path):
         # Initialize API
         from src.api.app import app, init_api
 
-        status_checker = create_status_checker(lm_retriever, vector_store)
+        status_checker = create_status_checker(rag, lm_retriever, vector_store)
         init_api(rag, get_or_create_system, status_checker)
 
         logger.info("✓ API initialized successfully")

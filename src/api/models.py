@@ -36,7 +36,16 @@ class QueryRequest(BaseModel):
     """Request model for a query."""
 
     query: str = Field(..., description="User query in Spanish")
+    use_rag: bool = Field(default=True, description="Whether to use the configurable RAG flow")
     top_k: int = Field(default=5, ge=1, le=50, description="Number of documents to retrieve")
+    temperature: Optional[float] = Field(default=None, description="LLM temperature")
+    relevance_threshold: Optional[float] = Field(default=None, description="RAG relevance threshold")
+    max_doc_chars: Optional[int] = Field(default=None, description="Max characters per document")
+    use_prf: bool = Field(default=True, description="Whether to use Pseudo-Relevance Feedback")
+    use_internet_search: bool = Field(
+        default=True,
+        description="Whether to allow internet search fallback when local relevance is low",
+    )
 
 
 class QueryResponse(BaseModel):
@@ -95,6 +104,7 @@ class SystemStatusResponse(BaseModel):
     vector_store_available: bool
     lm_stats: Optional[IndexStats] = None
     vector_stats: Optional[VectorStoreStats] = None
+    model_info: Optional[str] = Field(default=None, description="Active LLM model information")
     message: str = Field(description="Additional status message")
 
 

@@ -36,7 +36,13 @@ async def query(request: QueryRequest) -> QueryResponse:
     Query the RAG system for an answer.
     
     - **query**: User query in Spanish
+    - **use_rag**: Whether to use the configurable RAG flow
     - **top_k**: Number of documents to retrieve (1-50)
+    - **temperature**: Optional LLM temperature override
+    - **relevance_threshold**: Optional relevance threshold override
+    - **max_doc_chars**: Optional document truncation limit
+    - **use_prf**: Whether to use pseudo-relevance feedback
+    - **use_internet_search**: Whether to allow internet fallback search
     """
     if not _rag_pipeline:
         raise HTTPException(
@@ -45,7 +51,16 @@ async def query(request: QueryRequest) -> QueryResponse:
         )
 
     try:
-        result = _rag_pipeline.answer(query=request.query)
+        result = _rag_pipeline.answer(
+            query=request.query,
+            use_rag=request.use_rag,
+            top_k=request.top_k,
+            use_prf=request.use_prf,
+            temperature=request.temperature,
+            relevance_threshold=request.relevance_threshold,
+            max_doc_chars=request.max_doc_chars,
+            use_internet_search=request.use_internet_search,
+        )
 
         return QueryResponse(
             query=result["query"],

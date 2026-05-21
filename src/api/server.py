@@ -22,18 +22,39 @@ def initialize_system(model_path, force=False):
     from src.vector_db.embeddings import get_embeddings, TfidfEmbeddings
     from src.vector_db.vector_store import VectorStore
     from src.rag.rag import RAGPipeline
-
+    from src.generator.answer_generator import AnswerGenerator
+    from src.indexing.chunker import DocumentChunker
+    from langchain_community.llms import LlamaCpp
+    from src.config import MODEL_MAX_TOKENS, MODEL_N_CTX, MODEL_TEMPERATURE, MODEL_VERBOSE
+    
     logger.info("Initializing SRI system...")
 
     indexes_dir = Path("indexes")
 
     try:
         normalizer = TextNormalizer()
-
+        chuker = DocumentChunker()
         def get_or_create_system(force=force):
             """Load or create the hybrid retrieval system."""
             lm_path = indexes_dir / "lm"
             index_path = indexes_dir / "index"
+
+            shared_chunked_docs = None
+
+            def get_chunked_docs():
+                nonlocal shared_chunked_docs
+                docs = DocumentStore("data").load_all()
+                d = docs.all()
+                if shared_chunked_docs is None:
+                    docs = DocumentStore("data").load_all()
+                    d = docs.all()
+                    if not d:
+                        shared_chunked_docs = []
+                    else:
+                        logger.info(f"Chunking {len(d)} documents...")
+                        shared_chunked_docs = chuker.chunk_corpus(d)
+                        logger.info(f"Created {len(shared_chunked_docs)} chunks")
+                return shared_chunked_docs
 
             # LMRetriever
             if not force and lm_path.exists():
@@ -41,13 +62,13 @@ def initialize_system(model_path, force=False):
                 lm = LMRetriever.load(lm_path)
             else:
                 logger.info("Building new LM retriever...")
-                docs = DocumentStore("data").load_all()
-                d = docs.all()
-                if not d:
+                chunked_docs = get_chunked_docs()
+                if not chunked_docs:
                     logger.warning("No documents found in data/")
                     return None, None
-                indexer = InvertedIndex(normalizer=normalizer)
-                indexer.build(d)
+                
+                indexer = InvertedIndex(normalizer=normalizer, chunker=None)
+                indexer.build(chunked_docs)
                 indexer.save(index_path)
                 lm = LMRetriever.from_inverted_index(indexer)
                 lm.save(lm_path)
@@ -56,50 +77,90 @@ def initialize_system(model_path, force=False):
             logger.info("Initializing embeddings and vector store...")
             embeddings_path = indexes_dir / "vector_store"
             
-            # embeddings = get_embeddings()
-            if (embeddings_path / "tfidf_embeddings.pkl").exists():
-                logger.info("Loading existing TF-IDF embeddings model...")
-                embeddings = TfidfEmbeddings.load(embeddings_path)
-            else:
-                logger.info("Initializing new TF-IDF embeddings model...")
-                embeddings = TfidfEmbeddings(normalizer=normalizer)
+            
+            #embeddings = get_embeddings()
+            
+            if 'embeddings' not in locals():
+                if (embeddings_path / "tfidf_embeddings.pkl").exists():
+                    logger.info("Loading existing TF-IDF embeddings model...")
+                    embeddings = TfidfEmbeddings.load(embeddings_path)
+                else:
+                    logger.info("Initializing new TF-IDF embeddings model...")
+                    embeddings = TfidfEmbeddings(normalizer=normalizer)
                 
             vector_store = VectorStore(embeddings=embeddings)
 
             if force or vector_store.stats()["num_documents"] == 0:
-                logger.info("Populating vector store...")
-                docs = DocumentStore("data").load_all()
-                doc_ids = []
-                texts = []
-                metadatas = []
-                for doc in docs:
-                    doc_id = str(doc.get("id") or doc.get("url", ""))
-                    doc_ids.append(doc_id)
-                    texts.append(f"{doc.get('title', '')} {doc.get('content', '')}")
-                    metadatas.append(doc)
-
-                if isinstance(embeddings, TfidfEmbeddings):
-                    embeddings.fit(docs.all())
-                    embeddings.save(embeddings_path)
+                logger.info("Populating vector store with chunks...")
+                chunked_docs = get_chunked_docs()
                 
-                vector_store.setup(doc_ids, texts, metadatas, reset=True)
+                if chunked_docs:
+                    doc_ids = []
+                    texts = []
+                    metadatas = []
+                    for chunk in chunked_docs:
+                        chunk_id = chunk.get("chunk_id", str(chunk.get("id", "")))
+                        doc_ids.append(chunk_id)
+                        texts.append(" ".join(normalizer.normalize(chunk.get("content", ""))))
+                        metadatas.append(chunk)
+
+                    if isinstance(embeddings, TfidfEmbeddings):
+                        embeddings.fit(metadatas)
+                        embeddings.save(embeddings_path)
+                    
+                    vector_store.setup(doc_ids, texts, metadatas, reset=True)
+                    logger.info(f"Vector store populated with {len(doc_ids)} chunks")
+                else:
+                    logger.warning("No chunks available to populate the vector store.")
 
             return lm, vector_store
 
-        # Initialize both retrieval systems
         logger.info("Creating retrieval systems...")
         lm_retriever, vector_store = get_or_create_system(force=force)
 
-        # Initialize LangChain RAG Pipeline
-        logger.info("Initializing RAG pipeline...")
+        # Initialize LangChain RAG Pipeline 
+        logger.info("Initializing RAG pipeline (retrieval)...")
+        from src.search_internet.searcher import WebSearcher
+        from src.retrieval.query_processor import QueryProcessor
+        from src.positioning.ranker import ResultRanker
+        from src.utils.model_downloader import ModelDownloader
+        web_searcher = WebSearcher(normalizer=normalizer)
+        query_processor = QueryProcessor(lm_retriever.normalizer)
+        ranker = ResultRanker(
+            relevance_weight=0.5,
+            popularity_weight=0.15,
+            freshness_weight=0.2,
+            completeness_weight=0.1,
+            source_quality_weight=0.05,
+        )
+        
         rag = RAGPipeline(
             retriever_lm=lm_retriever,
             vector_store=vector_store,
-            model_path=model_path,
+            web_searcher=web_searcher,
+            query_processor=query_processor,
+            ranker=ranker,
         )
-
+        
+        # Initialize standalone Answer Generator (generation only)
+        logger.info("Initializing Answer Generator...")
+        
+        # Find or download model
+        model_path_resolved = str(ModelDownloader.ensure_model_exists(model_path))
+        logger.info(f"Using model: {model_path_resolved}")
+        
+        from langchain_community.llms import LlamaCpp
+        llm = LlamaCpp(
+            model_path=model_path_resolved,
+            temperature=MODEL_TEMPERATURE,
+            max_tokens=MODEL_MAX_TOKENS,
+            n_ctx=MODEL_N_CTX,
+            verbose=MODEL_VERBOSE,
+        )
+        generator = AnswerGenerator(llm=llm)
+        
         logger.info("✓ SRI system initialized successfully")
-        return rag, get_or_create_system, lm_retriever, vector_store
+        return rag, get_or_create_system, lm_retriever, vector_store, generator
 
     except Exception as exc:
         logger.error(f"Failed to initialize system: {exc}", exc_info=True)
@@ -140,7 +201,7 @@ def main(model_path):
     """Main entry point."""
     try:
         # Initialize system
-        rag, get_or_create_system, lm_retriever, vector_store = initialize_system(
+        rag, get_or_create_system, lm_retriever, vector_store, generator = initialize_system(
             model_path, force=False
         )
 
@@ -148,7 +209,7 @@ def main(model_path):
         from src.api.app import app, init_api
 
         status_checker = create_status_checker(rag, lm_retriever, vector_store)
-        init_api(rag, get_or_create_system, status_checker)
+        init_api(rag, get_or_create_system, status_checker, generator)
 
         logger.info("✓ API initialized successfully")
         logger.info("Starting FastAPI server...")

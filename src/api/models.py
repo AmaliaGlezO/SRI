@@ -48,6 +48,13 @@ class QueryRequest(BaseModel):
     )
 
 
+class TokenUsage(BaseModel):
+    """Token usage information."""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+
+
 class QueryResponse(BaseModel):
     """Response model for a query."""
 
@@ -58,6 +65,7 @@ class QueryResponse(BaseModel):
         description="Whether internet search was performed as fallback"
     )
     top_local_score: float = Field(description="Relevance score of top local result")
+    token_usage: TokenUsage = Field(default_factory=TokenUsage, description="Token usage for this query")
     retrieved_documents: List[RetrievedDocument] = Field(
         description="Documents retrieved and used"
     )

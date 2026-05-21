@@ -21,18 +21,21 @@ logger = logging.getLogger(__name__)
 _rag_pipeline = None
 _system_initializer = None
 _status_checker = None
+_generator = None
 
 
-def init_api(rag_pipeline, system_initializer, status_checker):
+def init_api(rag_pipeline, system_initializer, status_checker, generator=None):
     """Initialize API with dependencies."""
-    global _rag_pipeline, _system_initializer, _status_checker
+    global _rag_pipeline, _system_initializer, _status_checker, _generator
 
     _rag_pipeline = rag_pipeline
     _system_initializer = system_initializer
     _status_checker = status_checker
+    _generator = generator
 
     # Inject dependencies into routers
     query.set_rag_pipeline(rag_pipeline)
+    query.set_generator(generator)
     indexing.set_system_initializer(system_initializer)
     health.set_status_checker(status_checker)
 
@@ -173,6 +176,6 @@ async def root():
 
 
 
-app.include_router(query.router, prefix="/api")
-app.include_router(indexing.router, prefix="/api")
-app.include_router(health.router, prefix="/api")
+app.include_router(query.router,prefix="/api")
+app.include_router(indexing.router,prefix="/api")
+app.include_router(health.router,prefix="/api")

@@ -10,35 +10,20 @@ import nltk
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
 from nltk.tokenize import word_tokenize
-import emoji
 
 from src.errors.indexing_errors import (
     IndexLoadError,
     IndexPersistenceError,
     InvalidDocumentError,
-    NltkResourceError,
+    
 )
+from src.indexing.chunker import DocumentChunker
+from src.utils.logger import indexing_logger as logger
+import emoji
 
 
-def _ensure_nltk() -> None:
-    """Ensure required NLTK data is available"""
-    datasets = [
-        ("tokenizers/punkt_tab", "punkt_tab"),
-        ("corpora/stopwords", "stopwords"),
-    ]
-    for resource_path, download_id in datasets:
-        try:
-            nltk.data.find(resource_path)
-        except LookupError:
-            try:
-                nltk.download(download_id, quiet=True)
-            except Exception as exc:
-                raise NltkResourceError(
-                    f"Failed to download required NLTK resource: {download_id}"
-                ) from exc
 
 
-_ensure_nltk()
 
 # Stop-words: Spanish
 _STOP_WORDS: frozenset[str] = frozenset(stopwords.words("spanish"))
@@ -76,6 +61,7 @@ class TextNormalizer:
 
         # remove emojis
         text = emoji.replace_emoji(text, replace="")
+        
         # tokenize
         tokens = word_tokenize(text, language="spanish")
 
@@ -109,8 +95,10 @@ class InvertedIndex:
     def __init__(
         self,
         normalizer: TextNormalizer | None = None,
+        chunker: DocumentChunker | None = None,
     ) -> None:
         self.normalizer = normalizer or TextNormalizer()
+        self.chunker = chunker
 
         self._index: dict[str, dict[str, int]] = defaultdict(dict)
         self._doc_info: dict[str, dict] = {}
@@ -125,23 +113,28 @@ class InvertedIndex:
             - "id"      : str – unique identifier
             - "content" : str – main text to index
             - "title"   : str (optional) – boosted at index time
+
+        If a chunker is configured, documents will be split into smaller chunks
+        before indexing for better retrieval granularity.
         """
         self._index = defaultdict(dict)
         self._doc_info = {}
         self._N = 0
+        
+        
 
         for doc in documents:
             if not isinstance(doc, dict):
                 raise InvalidDocumentError(
                     "Each indexed document must be a dictionary."
                 )
-            doc_id = str(doc.get("id") or doc.get("url", ""))
+            doc_id = str(doc.get("id") or doc.get("chunk_id") or doc.get("url", ""))
             title = doc.get("title", "") or ""
             content = doc.get("content", "") or ""
 
             if not doc_id:
                 raise InvalidDocumentError(
-                    "Each document must define either 'id' or 'url'."
+                    "Each document must define either 'id' or 'chunk_id' or 'url'."
                 )
 
             text = title + " " + content
@@ -159,20 +152,69 @@ class InvertedIndex:
             self._doc_info[doc_id] = {
                 "length": doc_length,
                 "title": title,
+                "content_preview": " ".join(tokens),
                 "url": doc.get("url", ""),
                 "source": doc.get("source", ""),
                 "date": doc.get("date", ""),
                 "author": doc.get("author", ""),
                 "tags": doc.get("tags", []),
-                "category": doc.get("category", ""),
-                "subcategory": doc.get("subcategory", ""),
-                "brand": doc.get("brand", ""),
-                "os": doc.get("os", ""),
-                "image": (doc.get("metadata") or {}).get("image", ""),
             }
             self._N += 1
 
         self._vocab = set(self._index.keys())
+        logger.info(f"Built index: {self._N} documents, {len(self._vocab)} terms")
+        
+    def add_documents(self, documents: list[dict]) -> None:
+        """Add new documents to the existing index."""
+        for doc in documents:
+            doc_id = str(doc.get("id") or doc.get("url", ""))
+            title = doc.get("title", "") or ""
+            content = doc.get("content", "") or ""
+            
+            if not doc_id:
+                continue
+            
+            text = title + " " + content
+            tokens = self.normalizer.normalize(text)
+            
+            if not tokens:
+                continue
+            
+            from collections import Counter
+            tf = Counter(tokens)
+            doc_length = len(tokens)
+            
+            for term, count in tf.items():
+                self._index[term][doc_id] = count
+            
+            if doc_id in self._doc_info:
+                self._doc_info[doc_id].update({
+                    "length": doc_length,
+                    "title": title,
+                    "content_preview": " ".join(tokens),
+                    "url": doc.get("url", ""),
+                    "source": doc.get("source", ""),
+                    "date": doc.get("date", ""),
+                    "author": doc.get("author", ""),
+                    "tags": doc.get("tags", []),
+                    "category": doc.get("category", ""),
+                })
+            else:
+                self._doc_info[doc_id] = {
+                    "length": doc_length,
+                    "title": title,
+                    "content_preview": " ".join(tokens),
+                    "url": doc.get("url", ""),
+                    "source": doc.get("source", ""),
+                    "date": doc.get("date", ""),
+                    "author": doc.get("author", ""),
+                    "tags": doc.get("tags", []),
+                    "category": doc.get("category", ""),
+                }
+                self._N += 1
+        
+        self._vocab = set(self._index.keys())
+        logger.info(f"Added {len(documents)} documents. Total: {self._N}")
 
     def save(self, directory: str | Path) -> None:
         """Persist the index to *directory* (created if absent)."""
@@ -200,9 +242,8 @@ class InvertedIndex:
         except Exception as exc:
             raise IndexPersistenceError(f"Failed to persist index to {path}") from exc
 
-        print(
-            f"[InvertedIndex] Saved: {self._N} docs, "
-            f"{len(self._vocab)} terms → {path}"
+        logger.info(
+            f"Saved: {self._N} docs, {len(self._vocab)} terms → {path}"
         )
 
     @classmethod

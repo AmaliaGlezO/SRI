@@ -1,7 +1,8 @@
 import os
 from pathlib import Path
 from typing import Optional
-
+from dotenv import load_dotenv
+load_dotenv()
 
 def _get_env_bool(key: str, default: bool = False) -> bool:
     """Parse boolean environment variable."""
@@ -75,8 +76,30 @@ RAG_PRF_TERMS = _get_env_int("RAG_PRF_TERMS", 10)
 
 # Retriever weights (LM vs Vector)
 RAG_LM_RETRIEVER_WEIGHT = _get_env_float("RAG_LM_RETRIEVER_WEIGHT", 0.5)
-RAG_MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS", 300))
+RAG_MAX_DOC_CHARS = int(os.environ.get("RAG_MAX_DOC_CHARS",3500))
 RAG_VECTOR_RETRIEVER_WEIGHT = _get_env_float("RAG_VECTOR_RETRIEVER_WEIGHT", 0.5)
+
+# Ranker weights (configurable via env vars)
+RANKER_RELEVANCE_WEIGHT = _get_env_float("RANKER_RELEVANCE_WEIGHT", 0.5)
+RANKER_POPULARITY_WEIGHT = _get_env_float("RANKER_POPULARITY_WEIGHT", 0.15)
+RANKER_FRESHNESS_WEIGHT = _get_env_float("RANKER_FRESHNESS_WEIGHT", 0.2)
+RANKER_COMPLETENESS_WEIGHT = _get_env_float("RANKER_COMPLETENESS_WEIGHT", 0.1)
+RANKER_SOURCE_QUALITY_WEIGHT = _get_env_float("RANKER_SOURCE_QUALITY_WEIGHT", 0.05)
+
+# Trusted domains for ranking
+RANKER_TRUSTED_DOMAINS = _get_env_str(
+    "RANKER_TRUSTED_DOMAINS",
+    "stackoverflow.com,github.com,mdn.io,docs.python.org,xataka.com"
+).split(",")
+
+# Presentation badges
+PRESENTATION_BADGES = {
+    "tech_news": {"label": "Noticia", "color": "blue"},
+    "encyclopedia": {"label": "Enciclopedia", "color": "green"},
+    "documentation": {"label": "Docs", "color": "purple"},
+    "video": {"label": "Video", "color": "red"},
+    "web": {"label": "Web", "color": "gray"},
+}
 
 # Number of documents to retrieve
 RAG_RETRIEVER_K = _get_env_int("RAG_RETRIEVER_K", 3)
@@ -95,6 +118,7 @@ VECTOR_DB_TOP_K = _get_env_int("VECTOR_DB_TOP_K", 10)
 # WEB SEARCH CONFIGURATION
 # ============================================================================
 
+WEB_SEARCH_ENGINE = _get_env_str("WEB_SEARCH_ENGINE", "duckduckgo")
 WEB_SEARCH_MAX_RESULTS = _get_env_int("WEB_SEARCH_MAX_RESULTS", 5)
 WEB_SEARCH_REGION = _get_env_str("WEB_SEARCH_REGION", "es-es")
 WEB_SEARCH_TIME = _get_env_str("WEB_SEARCH_TIME", "y")
@@ -113,3 +137,6 @@ API_CORS_ORIGINS = _get_env_str("API_CORS_ORIGINS", "*").split(",")
 
 INDEX_LANGUAGE = _get_env_str("INDEX_LANGUAGE", "spanish")
 INDEX_SAVE_DIR = str((INDEXES_DIR).absolute())
+
+
+DEFAULT_TIMEOUT = _get_env_int(os.getenv("DEFAULT_TIMEOUT",15),15)

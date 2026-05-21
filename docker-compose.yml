@@ -1,0 +1,32 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    tty: true
+    stdin_open: true
+    environment:
+      - HF_HOME=/app/models/hf_cache
+    volumes:
+      - ./:/app:cached
+      - ./data:/app/data
+      - ./indexes:/app/indexes
+      - ./models:/app/models
+    # Optional: if you want to use GPU for Sentence Transformers inside docker, configure deploy:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+  ui:
+    build: ./ui
+    ports:
+      - "5173:80"
+    volumes:
+      - ./ui/dist:/usr/share/nginx/html:ro
+      - ./ui/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api

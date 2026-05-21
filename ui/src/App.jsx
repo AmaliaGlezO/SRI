@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bot, BookOpen, ExternalLink, Loader2, Menu, Send, User, X } from 'lucide-react'
-import { FormattedText, SidebarSettings, StreamingText, WelcomePanel } from './components'
+import { FormattedText, SidebarSettings, StreamingText, WelcomePanel, TokenStats, StatsTooltip } from './components'
 
 const suggestionCards = [
     { label: 'Mejores móviles de 2026', icon: '📱' },
@@ -20,13 +20,19 @@ function App() {
         return window.innerWidth >= 1024
     })
     const [useRag, setUseRag] = useState(true)
-    const [topK, setTopK] = useState(5)
-    const [temperature, setTemperature] = useState(0.2)
+    const [topK, setTopK] = useState(3)
+    const [temperature, setTemperature] = useState(0.3)
     const [relevanceThreshold, setRelevanceThreshold] = useState(0.45)
-    const [maxDocChars, setMaxDocChars] = useState(3500)
+    const [maxDocChars, setMaxDocChars] = useState(1500)
     const [usePrf, setUsePrf] = useState(true)
     const [useInternetSearch, setUseInternetSearch] = useState(true)
     const [apiError, setApiError] = useState('')
+
+    // Token tracking
+    const [sessionId] = useState(() => `session_${Date.now()}`)
+    const [tokenStats, setTokenStats] = useState({ total_input: 0, total_output: 0, total: 0 })
+    const [sessionTokens, setSessionTokens] = useState({ input: 0, output: 0, total: 0 })
+
     const chatEndRef = useRef(null)
 
     useEffect(() => {
@@ -36,7 +42,7 @@ function App() {
     useEffect(() => {
         const fetchStatus = async () => {
             try {
-                const res = await fetch('/api/status')
+                const res = await fetch('api/status')
                 const data = await res.json()
                 if (data.model_info) {
                     setModelName(String(data.model_info).split('/').pop())
@@ -48,6 +54,44 @@ function App() {
 
         fetchStatus()
     }, [])
+
+    // Cargar stats de tokens
+    useEffect(() => {
+        const fetchTokenStats = async () => {
+            try {
+                const res = await fetch('api/query/stats/tokens')
+                if (res.ok) {
+                    const data = await res.json()
+                    setTokenStats({
+                        total_input: data.total_input_tokens || 0,
+                        total_output: data.total_output_tokens || 0,
+                        total: data.total_tokens || 0,
+                    })
+                }
+            } catch (e) { }
+        }
+        fetchTokenStats()
+    }, [])
+
+    // Cargar stats de sesión
+    useEffect(() => {
+        const fetchSessionStats = async () => {
+            try {
+                const res = await fetch(`api/query/stats/session/${sessionId}`)
+                if (res.ok) {
+                    const data = await res.json()
+                    if (data) {
+                        setSessionTokens({
+                            input: data.total_input_tokens || 0,
+                            output: data.total_output_tokens || 0,
+                            total: data.total_tokens || 0,
+                        })
+                    }
+                }
+            } catch (e) { }
+        }
+        fetchSessionStats()
+    }, [sessionId])
 
     const handleSearch = async (event) => {
         event.preventDefault()
@@ -74,7 +118,7 @@ function App() {
         setLoading(true)
 
         try {
-            const response = await fetch('/api/query', {
+            const response = await fetch('api/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -102,11 +146,36 @@ function App() {
                         ...updated[lastIndex],
                         content: data.answer || 'No se pudo generar una respuesta.',
                         sources: data.retrieved_documents || [],
-                        isStreaming: false,
+                        isStreaming: true,
                     }
                 }
                 return updated
             })
+
+            // Actualizar tokens de sesión
+            if (data.token_usage) {
+                const newSessionTokens = {
+                    input: sessionTokens.input + (data.token_usage.input_tokens || 0),
+                    output: sessionTokens.output + (data.token_usage.output_tokens || 0),
+                }
+                newSessionTokens.total = newSessionTokens.input + newSessionTokens.output
+                setSessionTokens(newSessionTokens)
+
+                // Recargar stats globales
+                try {
+                    const statsRes = await fetch('api/query/stats/tokens')
+                    if (statsRes.ok) {
+                        const statsData = await statsRes.json()
+                        setTokenStats({
+                            total_input: statsData.total_input_tokens || 0,
+                            total_output: statsData.total_output_tokens || 0,
+                            total: statsData.total_tokens || 0,
+                        })
+                    }
+                } catch (e) { }
+            }
+
+
         } catch (error) {
             console.error(error)
             setApiError('No se pudo completar la consulta. Revisa el estado de la API o ajusta los parámetros de RAG.')
@@ -182,16 +251,25 @@ function App() {
                                 </h1>
                             </button>
                         </div>
-                        {!sidebarOpen && (
-                            <button
-                                type="button"
-                                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-200"
-                                aria-label="Abrir barra lateral"
-                                onClick={() => setSidebarOpen(true)}
-                            >
-                                <Menu className="h-5 w-5" />
-                            </button>
-                        )}
+
+                        <div className="flex items-center gap-2">
+                            {/* Stats Tooltip */}
+                            <StatsTooltip
+                                globalStats={tokenStats}
+                                sessionStats={sessionTokens}
+                            />
+
+                            {!sidebarOpen && (
+                                <button
+                                    type="button"
+                                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-slate-200"
+                                    aria-label="Abrir barra lateral"
+                                    onClick={() => setSidebarOpen(true)}
+                                >
+                                    <Menu className="h-5 w-5" />
+                                </button>
+                            )}
+                        </div>
                     </div>
                 </nav>
 
@@ -267,7 +345,7 @@ function App() {
                                                         <div className="prose prose-invert max-w-none">
                                                             {/* Mostrar tres puntos mientras está en streaming y no hay contenido */}
                                                             {message.isStreaming && !message.content && !message.isError ? (
-                                                                <div className="flex items-center gap-1 py-2.5">
+                                                                <div className="flex items-center gap-1 py-3">
                                                                     <span className="block w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
                                                                     <span className="block w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
                                                                     <span className="block w-2 h-2 bg-indigo-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
@@ -382,7 +460,7 @@ function App() {
                                 <span className="rounded-full border border-white/5 bg-white/[0.03] px-3 py-1">PRF {usePrf ? 'on' : 'off'}</span>
                                 <span className="rounded-full border border-white/5 bg-white/[0.03] px-3 py-1">web {useInternetSearch ? 'on' : 'off'}</span>
                             </div>
-                            <p className="text-[9px] font-black uppercase tracking-[0.4em] text-slate-600">SRI RAG AI SYSTEM • 2026</p>
+                            <p className="text-[9px] font-black uppercase tracking-[0.4em] text-slate-300">SRI RAG AI SYSTEM • 2026</p>
                         </div>
                     </div>
                 </div>

@@ -16,6 +16,7 @@ from src.errors.vector_db_errors import (
     EmptyDocumentListError,
 )
 from src.indexing.indexer import InvertedIndex, TextNormalizer
+from src.utils.logger import vector_logger as logger
 
 
 class TfidfEmbeddings(Embeddings):
@@ -48,12 +49,12 @@ class TfidfEmbeddings(Embeddings):
         for doc in documents:
             text = f"{doc.get('title', '')} {doc.get('content', '')}"
             texts.append(text)
-
+        logger.info(f"Fitting TF-IDF model on {len(texts)} documents...")
         self._vectorizer.fit(texts)
         self._fitted = True
 
         v = len(self._vectorizer.vocabulary_)
-        print(f"[TfidfEmbeddings] TF-IDF Fitted: {len(documents)} docs | {v} terms")
+        logger.info(f"TF-IDF Fitted: {len(documents)} docs | {v} terms")
         return self
 
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
@@ -92,7 +93,7 @@ def get_embeddings(
     backend = os.environ.get("GGML_BACKEND", "cpu").lower()
     device = "cuda" if backend in ("cuda", "metal") else "cpu"
 
-    print(f"[Embeddings] Loading Transformer model: {model_name} on {device}...")
+    logger.info(f"Loading Transformer model: {model_name} on {device}...")
     return HuggingFaceEmbeddings(
         model_name=model_name,
         model_kwargs={"device": device},

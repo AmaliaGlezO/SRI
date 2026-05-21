@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterator
 
 from src.errors.indexing_errors import DocumentParseError, SnapshotLoadError
+from src.utils.logger import indexing_logger as logger
 
 
 class DocumentStore:
@@ -59,7 +60,7 @@ class DocumentStore:
                     err = DocumentParseError(
                         f"Invalid JSON in {path} at line {line_no}: {exc}"
                     )
-                    print(f"[DocumentStore] {err}")
+                    logger.warning(f"Error: {err}")
                     continue
 
                 doc = self._normalise(raw, category=category)
@@ -151,7 +152,7 @@ class DocumentStore:
         with open(path, "w", encoding="utf-8") as fh:
             for doc in self._docs.values():
                 fh.write(json.dumps(doc, ensure_ascii=False) + "\n")
-        print(f"[DocumentStore] Snapshot saved: {len(self)} docs → {path}")
+        logger.info(f"Snapshot saved: {len(self)} docs → {path}")
 
     @classmethod
     def from_snapshot(cls, path: str | Path) -> "DocumentStore":

@@ -9,6 +9,9 @@ from src.errors.retrieval_errors import (
     RetrieverNotInitializedError,
 )
 from src.indexing.indexer import InvertedIndex, TextNormalizer
+from src.utils.logger import get_logger
+
+logger = get_logger("LMRetriever")
 
 
 class LMRetriever:
@@ -57,8 +60,8 @@ class LMRetriever:
         """
         Build a Language Model retriever system from an InvertedIndex.
         """
-        print(
-            f"[LMRetriever] Initialising Language Model with Dirichlet Smoothing (μ={mu})..."
+        logger.info(
+            f"Initialising Language Model with Dirichlet Smoothing (μ={mu})..."
         )
         return cls(index=index, normalizer=index.normalizer, mu=mu)
 
@@ -163,7 +166,7 @@ class LMRetriever:
                 # Term Frequency in Document
                 f_qd = self.index._index.get(q, {}).get(doc_id, 0)
                 # Collection Probability
-                p_qC = self._collection_probs.get(q, 1e-9)  # Small epsilon if unseen
+                p_qC = self._collection_probs.get(q, 1e-9) 
 
                 # Dirichlet smoothed probability:
                 # P(q|d) = (f_qd + μ * P(q|C)) / (|d| + μ)
@@ -171,7 +174,7 @@ class LMRetriever:
 
                 # Log probability weighted by term weight in query
                 score += weight * math.log(prob)
-
+            score = math.exp(score)
             doc_scores[doc_id] = score
 
         return doc_scores
@@ -209,7 +212,7 @@ class LMRetriever:
         with open(path / self.MODEL_FILE, "wb") as fh:
             pickle.dump(state, fh, protocol=pickle.HIGHEST_PROTOCOL)
 
-        print(f"[LMRetriever] Saved to {directory}")
+        logger.info(f"Saved to {directory}")
 
     @classmethod
     def load(cls, directory: str | Path) -> "LMRetriever":

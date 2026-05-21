@@ -2,22 +2,13 @@
 
 Spanish Information Retrieval system using RAG (Retrieval-Augmented Generation) with hybrid search (LM + Vector) and automatic web search fallback.
 
-## Características
-
-- **Búsqueda Híbrida**: Combina recuperación基于语言模型 (LM) y búsqueda vectorial
-- **RAG Pipeline**: Pipeline completo con LangChain para generación de respuestas
-- **Web Search Fallback**: Búsqueda automática en internet cuando la relevancia local es baja
-- **Pseudo-Relevance Feedback**: Expansión de consultas para mejorar recuperación
-- **Streaming en Tiempo Real**: Visualización del proceso de respuesta en tiempo real
-- **UI Moderna**: Interfaz de usuario estilo DeepSeek con indicadores de procesamiento
-
 ## Requisitos
 
 - Python 3.10+
 - Node.js 18+ (para UI)
 - uv
 - 4GB+ RAM mínimo (8GB+ recomendado)
-- 2GB+ espacio libre en disco para el modelo
+- 20GB+ espacio libre en disco para el modelo y los contenedores
 
 ## Instalación
 
@@ -39,9 +30,10 @@ uv run api.py
 ```
 
 La API estará disponible en:
-- API: http://localhost:8000
-- Documentación: http://localhost:8000/docs
-- Health Check: http://localhost:8000/health
+
+- API: <http://localhost:8000>
+- Documentación: <http://localhost:8000/docs>
+- Health Check: <http://localhost:8000/health>
 
 ### Interfaz Web
 
@@ -50,7 +42,7 @@ La API estará disponible en:
 cd ui && npm run dev
 ```
 
-La UI estará disponible en: http://localhost:5173
+La UI estará disponible en: <http://localhost:5173>
 
 ## Variables de Entorno
 
@@ -60,7 +52,7 @@ Copia `.env.example` a `.env` y ajusta los valores según necesidad.
 
 | Variable | Descripción | Por Defecto |
 |----------|-------------|-------------|
-| `MODEL_PATH` | Ruta al archivo del modelo (vacío = descargar modelo por defecto) | "" |
+| `MODEL_PATH` | nombre del modelo en huggingface (vacío = descargar modelo por defecto) | "" |
 | `MODEL_TEMPERATURE` | Temperatura de muestreo LLM | 0.3 |
 | `MODEL_MAX_TOKENS` | Máximo de tokens a generar | 2048 |
 | `MODEL_N_CTX` | Tamaño de ventana de contexto | 2048 |
@@ -78,8 +70,19 @@ Copia `.env.example` a `.env` y ajusta los valores según necesidad.
 | `RAG_PRF_TERMS` | Número de términos para expansión | 10 |
 | `RAG_LM_RETRIEVER_WEIGHT` | Peso del retriever LM (0.0-1.0) | 0.5 |
 | `RAG_VECTOR_RETRIEVER_WEIGHT` | Peso del retriever vector (0.0-1.0) | 0.5 |
-| `RAG_RETRIEVER_K` | Número de documentos a recuperar | 5 |
-| `RAG_MAX_DOC_CHARS` | Máximo caracteres por documento | 500 |
+| `RAG_RETRIEVER_K` | Número de documentos a recuperar | 3 |
+| `RAG_MAX_DOC_CHARS` | Máximo caracteres por documento | 300 |
+
+### Configuración del Ranker
+
+| Variable | Descripción | Por Defecto |
+|----------|-------------|-------------|
+| `RANKER_RELEVANCE_WEIGHT` | Peso de relevancia en ranking (0.0-1.0) | 0.5 |
+| `RANKER_POPULARITY_WEIGHT` | Peso de popularidad (0.0-1.0) | 0.15 |
+| `RANKER_FRESHNESS_WEIGHT` | Peso de frescura (0.0-1.0) | 0.2 |
+| `RANKER_COMPLETENESS_WEIGHT` | Peso de completitud (0.0-1.0) | 0.1 |
+| `RANKER_SOURCE_QUALITY_WEIGHT` | Peso de calidad de fuente (0.0-1.0) | 0.05 |
+| `RANKER_TRUSTED_DOMAINS` | Dominios trustados separados por coma | wikipedia.org,stackoverflow.com,github.com,mdn.io,docs.python.org,xataka.com |
 
 ### Configuración Vector DB
 
@@ -93,6 +96,7 @@ Copia `.env.example` a `.env` y ajusta los valores según necesidad.
 
 | Variable | Descripción | Por Defecto |
 |----------|-------------|-------------|
+| `WEB_SEARCH_ENGINE` | Motor de búsqueda (duckduckgo, yandex, brave) | duckduckgo |
 | `WEB_SEARCH_MAX_RESULTS` | Máximo de resultados web | 5 |
 | `WEB_SEARCH_REGION` | Región de búsqueda (es-es) | es-es |
 | `WEB_SEARCH_TIME` | Filtro temporal (y = año) | y |
@@ -120,14 +124,12 @@ Copia `.env.example` a `.env` y ajusta los valores según necesidad.
 ### Query
 
 ```bash
-# Con streaming (recomendado)
-POST /api/query/stream
-
 # Sin streaming
 POST /api/query
 ```
 
 Cuerpo de la petición:
+
 ```json
 {
   "query": "¿Cuál es el mejor móvil de 2024?",
@@ -139,18 +141,6 @@ Cuerpo de la petición:
   "relevance_threshold": 0.4,
   "max_doc_chars": 500
 }
-```
-
-### Indexing
-
-```bash
-POST /api/indexing
-```
-
-### Health
-
-```bash
-GET /api/health
 ```
 
 ## Estructura del Proyecto
@@ -167,7 +157,8 @@ SRI/
 │   ├── rag/                   # Pipeline RAG
 │   ├── retrieval/             # Componentes de recuperación
 │   ├── vector_db/             # Base de datos vectorial
-│   ├── indexing/             # Indexación de documentos
+│   ├── indexing/              # Indexación (InvertedIndex, DocumentChunker)
+│   ├── positioning/           # Ranking y presentación de resultados
 │   ├── generator/            # Wrapper del LLM
 │   ├── search_internet/      # Búsqueda web
 │   └── extract_data/         # Scraping de datos
@@ -180,6 +171,13 @@ SRI/
 └── README.md
 ```
 
+### Módulos Clave
+
+- **indexing/DocumentChunker**: Divide documentos en chunks (estrategias: fixed_size, paragraph, sliding)
+- **positioning/ResultRanker**: Ranking multi-factor con pesos configurables (relevancia, popularidad, frescura, completitud, calidad de fuente)
+- **stats/stats.py**: Sistema de tracking de métricas para evaluación del RAG
+- **api/session_manager**: Gestor de sesiones con tracking de tokens
+
 ## Agregar Documentos
 
 Los documentos se almacenan en el directorio `data/`. El sistema los indexa automáticamente al iniciar.
@@ -187,6 +185,7 @@ Los documentos se almacenan en el directorio `data/`. El sistema los indexa auto
 Formatos soportados: JSON, texto plano
 
 Ejemplo de documento JSON:
+
 ```json
 {
   "title": "Título del artículo",
@@ -194,25 +193,6 @@ Ejemplo de documento JSON:
   "content": "Contenido del artículo...",
   "source": "xataka"
 }
-```
-
-## Desarrollo
-
-### Iniciar en modo desarrollo
-
-```bash
-# API
-uv run api.py
-
-# UI
-cd ui && npm run dev
-```
-
-### Construir para producción
-
-```bash
-# UI
-cd ui && npm run build
 ```
 
 ## Licencia

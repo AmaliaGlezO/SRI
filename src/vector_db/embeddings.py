@@ -3,19 +3,20 @@ from __future__ import annotations
 import os
 import pickle
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 from langchain_core.embeddings import Embeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 from sklearn.feature_extraction.text import TfidfVectorizer
+import signal
+from contextlib import contextmanager
 
 from src.errors.vector_db_errors import (
     EmbeddingModelNotFittedError,
     EmbeddingsModelNotFoundError,
-    EmptyDocumentListError,
+    EmptyDocumentListError,TimeoutError
 )
-from src.indexing.indexer import InvertedIndex, TextNormalizer
+from src.indexing.indexer import TextNormalizer
 from src.utils.logger import vector_logger as logger
 
 
@@ -45,12 +46,8 @@ class TfidfEmbeddings(Embeddings):
         if not documents:
             raise EmptyDocumentListError("Empty document list.")
 
-        texts = []
-        for doc in documents:
-            text = f"{doc.get('title', '')} {doc.get('content', '')}"
-            texts.append(text)
-        logger.info(f"Fitting TF-IDF model on {len(texts)} documents...")
-        self._vectorizer.fit(texts)
+        logger.info(f"Fitting TF-IDF model on {len(documents)} documents...")
+        self._vectorizer.fit(documents)
         self._fitted = True
 
         v = len(self._vectorizer.vocabulary_)
@@ -74,7 +71,8 @@ class TfidfEmbeddings(Embeddings):
         path.mkdir(parents=True, exist_ok=True)
         with open(path / "tfidf_embeddings.pkl", "wb") as fh:
             pickle.dump(self, fh, protocol=pickle.HIGHEST_PROTOCOL)
-
+    def __str__(self):
+        return f"TfidfEmbeddings( max_features = {self.max_features})"
     @classmethod
     def load(cls, directory: str | Path) -> "TfidfEmbeddings":
         path = Path(directory) / "tfidf_embeddings.pkl"
@@ -83,19 +81,55 @@ class TfidfEmbeddings(Embeddings):
         with open(path, "rb") as fh:
             return pickle.load(fh)
 
+def is_model_cached(model_name: str) -> bool:
+    cache_path = Path('models') / "hf_cache/hub/"
+    model_pattern = model_name.replace("/", "--")
+    return any(cache_path.glob(f"*{model_pattern}*"))
+
+
+
+@contextmanager
+def timeout(seconds):
+    """Context manager for timeout."""
+    def timeout_handler(signum, frame):
+        raise TimeoutError(f"Operation timed out after {seconds} seconds")
+    
+    original_handler = signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, original_handler)
 
 def get_embeddings(
-    model_name: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+    model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+    timeout_seconds: int = 30,
 ) -> Embeddings:
     """
-    Factory function to get the improved embedding model.
+    Factory function to get the improved embedding model with timeout.
     """
+    os.environ["HF_HUB_OFFLINE"] = "True"
+
+    if not is_model_cached(model_name):
+        del os.environ["HF_HUB_OFFLINE"]
+
     backend = os.environ.get("GGML_BACKEND", "cpu").lower()
     device = "cuda" if backend in ("cuda", "metal") else "cpu"
 
     logger.info(f"Loading Transformer model: {model_name} on {device}...")
-    return HuggingFaceEmbeddings(
-        model_name=model_name,
-        model_kwargs={"device": device},
-        encode_kwargs={"normalize_embeddings": True},
-    )
+    
+    try:
+        with timeout(timeout_seconds):
+            return HuggingFaceEmbeddings(
+                model_name=model_name,
+                model_kwargs={"device": device},
+                encode_kwargs={"normalize_embeddings": True},
+                show_progress=True 
+            )
+    except TimeoutError as exc:
+        logger.error(f"Model loading timed out after {timeout_seconds}s")
+        raise EmbeddingsModelNotFoundError(f"Could not load embeddings model: {model_name} (timeout)") from exc
+    except Exception as exc:
+        logger.error(f"Failed to load HuggingFace embeddings model: {exc}")
+        raise EmbeddingsModelNotFoundError(f"Could not load embeddings model: {model_name}") from exc

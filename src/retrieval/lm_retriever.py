@@ -55,6 +55,7 @@ class LMRetriever:
     def from_inverted_index(
         cls,
         index: InvertedIndex,
+        normalizer:TextNormalizer,
         mu: float = 2000.0,
     ) -> "LMRetriever":
         """
@@ -63,7 +64,7 @@ class LMRetriever:
         logger.info(
             f"Initialising Language Model with Dirichlet Smoothing (μ={mu})..."
         )
-        return cls(index=index, normalizer=index.normalizer, mu=mu)
+        return cls(index=index, normalizer=normalizer, mu=mu)
 
     def _precompute_collection_stats(self) -> None:
         """Calculate total tokens in collection and term collection probabilities."""
@@ -87,8 +88,6 @@ class LMRetriever:
         self,
         query: str | dict[str, float],
         top_k: int = 10,
-        category_filter: str | None = None,
-        filters: dict[str, str] | None = None,
     ) -> list[dict]:
         """
         Search and rank documents using Query Likelihood with Dirichlet Smoothing.
@@ -116,13 +115,8 @@ class LMRetriever:
             q_weights = query
             if not q_weights:
                 return []
-
-        #  Retrieval Pass
-        metadata_filters = dict(filters or {})
-        if category_filter:
-            metadata_filters["category"] = category_filter
-
-        doc_scores = self._score_documents(q_weights, metadata_filters)
+    
+        doc_scores = self._score_documents(q_weights)
 
         # Rank documents by highest score
         ranked_docs = sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)
@@ -140,7 +134,7 @@ class LMRetriever:
         return results
 
     def _score_documents(
-        self, q_weights: dict[str, float], metadata_filters: dict[str, str] | None
+        self, q_weights: dict[str, float]
     ) -> dict[str, float]:
         """Core scoring function (KL-divergence between query model and doc models)."""
         doc_scores: dict[str, float] = {}
@@ -150,14 +144,7 @@ class LMRetriever:
             if q in self.index._index:
                 candidate_docs.update(self.index._index[q].keys())
 
-        # Filter by explicit query metadata filters if requested.
-        if metadata_filters:
-            candidate_docs = {
-                d
-                for d in candidate_docs
-                if self._matches_filters(self.index._doc_info[d], metadata_filters)
-            }
-
+       
         for doc_id in candidate_docs:
             doc_len = self.index._doc_info[doc_id].get("length", 0)
             score = 0.0
@@ -178,24 +165,6 @@ class LMRetriever:
             doc_scores[doc_id] = score
 
         return doc_scores
-
-    @staticmethod
-    def _matches_filters(doc_info: dict, filters: dict[str, str]) -> bool:
-        """Return True when a document satisfies every query metadata filter."""
-        for key, expected in filters.items():
-            actual = doc_info.get(key)
-            expected_norm = str(expected).strip().lower()
-
-            if isinstance(actual, list):
-                actual_values = [str(item).strip().lower() for item in actual]
-                if expected_norm not in actual_values:
-                    return False
-            else:
-                actual_norm = str(actual or "").strip().lower()
-                if actual_norm != expected_norm:
-                    return False
-
-        return True
 
     def save(self, directory: str | Path) -> None:
         """Persist the retriever state and its components."""
@@ -254,3 +223,5 @@ class LMRetriever:
     def __repr__(self) -> str:
         num_docs = self.index._N if self.index else 0
         return f"LMRetriever(docs={num_docs}, mu={self.mu})"
+    def __str__(self) -> str:
+        return self.__repr__()

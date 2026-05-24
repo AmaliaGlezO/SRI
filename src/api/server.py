@@ -2,233 +2,246 @@
 
 import logging
 import sys
-from pathlib import Path
+import time
+from src.api.app import app
+import uvicorn
+from src.api.routes.query import set_dependencies
+from src.config import API_HOST, API_PORT, CHUNK_SIZE, CHUNK_OVERLAP, STRATEGY, MIN_CHUNK_SIZE,ALPHA,BETA,GAMMA
+from src.indexing.indexer import TextNormalizer, InvertedIndex
+from src.indexing.storage import DocumentStore
+from src.indexing.chunker import DocumentChunker
+from src.retrieval.lm_retriever import LMRetriever
+from src.config import \
+                CHUNK_SIZE, \
+                CHUNK_OVERLAP, \
+                STRATEGY, \
+                MIN_CHUNK_SIZE,\
+                INDEX_LANGUAGE,\
+                FORCE,INDEX_SAVE_DIR,DATA_DIR,\
+                MU,MAX_FEATURES,BATCH_SIZE,RESET,RAG_RELEVANCE_THRESHOLD,\
+                MODEL_TEMPERATURE,MODEL_MAX_TOKENS,MODEL_N_CTX,MODEL_VERBOSE
+from pathlib import Path             
+from src.vector_db.vector_store import VectorStore
+from src.vector_db.embeddings import TfidfEmbeddings,get_embeddings
+from src.search_internet.searcher import WebSearcher
+from src.retrieval.query_processor import QueryProcessor
+from src.positioning.ranker import ResultRanker
+from src.utils.model_downloader import ModelDownloader
+from src.rag.rag import RAGPipeline
+import tqdm 
+from src.feedback.rocchio import RocchioFeedback
+from src.generator.answer_generator import AnswerGenerator
+from langchain_community.llms import LlamaCpp
 
-from src.config import API_HOST, API_PORT, MODEL_PATH
 
-# Setup logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
+_indenxer=None
+_generator=None
+_rag_pipeline=None
+_text_normalizer=None
+_ranker=None
+lm_retrieval=None
+search_internet=None
+stats =None
+vector_db =None
+chunker=None
+globals={}
 
-def initialize_system(model_path, force=False):
-    """Initialize the SRI system components."""
-    from src.indexing.indexer import TextNormalizer, InvertedIndex
-    from src.indexing.storage import DocumentStore
-    from src.retrieval.lm_retriever import LMRetriever
-    from src.vector_db.embeddings import get_embeddings, TfidfEmbeddings
-    from src.vector_db.vector_store import VectorStore
-    from src.rag.rag import RAGPipeline
-    from src.generator.answer_generator import AnswerGenerator
-    from src.indexing.chunker import DocumentChunker
-    from langchain_community.llms import LlamaCpp
-    from src.config import MODEL_MAX_TOKENS, MODEL_N_CTX, MODEL_TEMPERATURE, MODEL_VERBOSE
-    
+async def initialize_components(model_path:str,force:bool=False) -> tuple:
     logger.info("Initializing SRI system...")
+    indexes_dir = Path(INDEX_SAVE_DIR)
+    logger.info("initializing DocumentChunker")
+    chunker = DocumentChunker(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        strategy=STRATEGY,
+        min_chunk_size=MIN_CHUNK_SIZE
+    )
+    logger.info(f"DocumentChunker initialized -> {chunker}")
+    logger.info("initializing TextNormalizer")
+    normalizer = TextNormalizer(language=INDEX_LANGUAGE)
+    logger.info(f"TextNormalizer initialized -> {normalizer}")
 
-    indexes_dir = Path("indexes")
-
-    try:
-        normalizer = TextNormalizer()
-        chuker = DocumentChunker()
-        def get_or_create_system(force=force):
-            """Load or create the hybrid retrieval system."""
-            lm_path = indexes_dir / "lm"
-            index_path = indexes_dir / "index"
-
-            shared_chunked_docs = None
-
-            def get_chunked_docs():
-                nonlocal shared_chunked_docs
-                docs = DocumentStore("data").load_all()
-                d = docs.all()
-                if shared_chunked_docs is None:
-                    docs = DocumentStore("data").load_all()
-                    d = docs.all()
-                    if not d:
-                        shared_chunked_docs = []
-                    else:
-                        logger.info(f"Chunking {len(d)} documents...")
-                        shared_chunked_docs = chuker.chunk_corpus(d)
-                        logger.info(f"Created {len(shared_chunked_docs)} chunks")
-                return shared_chunked_docs
-
-            # LMRetriever
-            if not force and lm_path.exists():
-                logger.info("Loading existing LM retriever...")
-                lm = LMRetriever.load(lm_path)
-            else:
-                logger.info("Building new LM retriever...")
-                chunked_docs = get_chunked_docs()
-                if not chunked_docs:
-                    logger.warning("No documents found in data/")
-                    return None, None
-                
-                indexer = InvertedIndex(normalizer=normalizer, chunker=None)
-                indexer.build(chunked_docs)
-                indexer.save(index_path)
-                lm = LMRetriever.from_inverted_index(indexer)
-                lm.save(lm_path)
-
-            # Embeddings & Vector Store
-            logger.info("Initializing embeddings and vector store...")
-            embeddings_path = indexes_dir / "vector_store"
-            
-            
-            #embeddings = get_embeddings()
-            
-            if 'embeddings' not in locals():
-                if (embeddings_path / "tfidf_embeddings.pkl").exists():
-                    logger.info("Loading existing TF-IDF embeddings model...")
-                    embeddings = TfidfEmbeddings.load(embeddings_path)
-                else:
-                    logger.info("Initializing new TF-IDF embeddings model...")
-                    embeddings = TfidfEmbeddings(normalizer=normalizer)
-                
-            vector_store = VectorStore(embeddings=embeddings)
-
-            if force or vector_store.stats()["num_documents"] == 0:
-                logger.info("Populating vector store with chunks...")
-                chunked_docs = get_chunked_docs()
-                
-                if chunked_docs:
-                    doc_ids = []
-                    texts = []
-                    metadatas = []
-                    for chunk in chunked_docs:
-                        chunk_id = chunk.get("chunk_id", str(chunk.get("id", "")))
-                        doc_ids.append(chunk_id)
-                        texts.append(" ".join(normalizer.normalize(chunk.get("content", ""))))
-                        metadatas.append(chunk)
-
-                    if isinstance(embeddings, TfidfEmbeddings):
-                        embeddings.fit(metadatas)
-                        embeddings.save(embeddings_path)
-                    
-                    vector_store.setup(doc_ids, texts, metadatas, reset=True)
-                    logger.info(f"Vector store populated with {len(doc_ids)} chunks")
-                else:
-                    logger.warning("No chunks available to populate the vector store.")
-
-            return lm, vector_store
-
-        logger.info("Creating retrieval systems...")
-        lm_retriever, vector_store = get_or_create_system(force=force)
-
-        # Initialize LangChain RAG Pipeline 
-        logger.info("Initializing RAG pipeline (retrieval)...")
-        from src.search_internet.searcher import WebSearcher
-        from src.retrieval.query_processor import QueryProcessor
-        from src.positioning.ranker import ResultRanker
-        from src.utils.model_downloader import ModelDownloader
-        web_searcher = WebSearcher(normalizer=normalizer)
-        query_processor = QueryProcessor(lm_retriever.normalizer)
-        ranker = ResultRanker(
-            relevance_weight=0.5,
-            popularity_weight=0.15,
-            freshness_weight=0.2,
-            completeness_weight=0.1,
-            source_quality_weight=0.05,
+    rocchio = RocchioFeedback(
+            normalizer=normalizer,
+            alpha=ALPHA,
+            beta=BETA,
+            gamma=GAMMA,
         )
         
-        rag = RAGPipeline(
+    indexer=None
+    def get_or_create_system(force: bool = False) -> tuple[VectorStore,LMRetriever]:
+        lm_path = indexes_dir / "lm"
+        index_path = indexes_dir / "index"
+        shared_chunked_docs = None
+        embeddings_path = indexes_dir / "vector_store"
+        chunked_docs=[]
+        def get_chunked_docs():
+            nonlocal shared_chunked_docs
+            if shared_chunked_docs is None:
+                logger.info(f"Loading documents from {DATA_DIR}")
+                docs = DocumentStore(DATA_DIR).load_all()
+                logger.info(f"Loaded {len(docs)} documents")
+                raw_docs = docs.all()
+                if not raw_docs:
+                    shared_chunked_docs = []
+                else:
+                    logger.info(f"Chunking {len(raw_docs)} documents...")
+                    shared_chunked_docs = chunker.chunk_corpus(raw_docs)
+                    logger.info(f"Created {len(shared_chunked_docs)} chunks")
+            return shared_chunked_docs   
+
+        if not force and lm_path.exists():
+            logger.info("Loading existing LM retriever...")
+            lm = LMRetriever.load(lm_path)
+            logger.info(f"LM retriever loaded -> {lm}")
+
+        else:
+            logger.info("Building new LM retriever...")
+            chunked_docs = get_chunked_docs()
+            if not chunked_docs:
+                logger.warning("No documents found in data/")
+                return None, None 
+        logger.info(f"Initializing InvertedIndex...")
+        if not index_path.exists():
+            indexer = InvertedIndex(normalizer=normalizer)
+            indexer.build(chunked_docs)
+            logger.info(f"InvertedIndex initialized -> {indexer}")
+            indexer.save(index_path)
+        
+        indexer = InvertedIndex.load(index_path)
+        lm = LMRetriever.from_inverted_index(indexer, normalizer=normalizer,mu=MU)
+        lm.save(lm_path)
+        logger.info(f"LMRetriever initialized -> {lm}")
+        logger.info("Initializing embeddings and vector store...")
+
+        try:
+            
+            embeddings = get_embeddings()
+            logger.info(f"Transformer embeddings initialized -> {embeddings}")
+        except Exception as exc:
+            logger.warning(f"Transformer embeddings unavailable, using TF-IDF: {exc}")
+            if (embeddings_path / "tfidf_embeddings.pkl").exists():
+                logger.info("Loading existing TF-IDF embeddings model...")
+                embeddings = TfidfEmbeddings.load(embeddings_path)
+                logger.info(f"TF-IDF embeddings loaded -> {embeddings}")
+            else:
+                logger.info("Initializing new TF-IDF embeddings model...")
+                embeddings = TfidfEmbeddings(normalizer=normalizer,max_features=MAX_FEATURES)
+                logger.info(f"TF-IDF embeddings initialized -> {embeddings}")
+                
+        logger.info(f"Initializing VectorStore")
+        vector_store = VectorStore(embeddings=embeddings)
+        logger.info(f"VectorStore initialized -> {vector_store}")
+
+        if force or vector_store.stats()["num_documents"] == 0:
+           
+            chunked_docs = get_chunked_docs()
+
+            if chunked_docs:
+                doc_ids = []
+                texts = []
+                metadata=[]
+                logger.info("processing chunk from embeddings ")
+                for chunk in tqdm.tqdm(chunked_docs, desc="Processing chunks for embeddings", total=len(chunked_docs)):
+                    chunk_id = chunk.get("chunk_id", str(chunk.get("id", "")))
+                    doc_ids.append(chunk_id)
+                    texts.append(" ".join(normalizer.normalize(chunk.get("content", ""), stopw=False, stem=False)))
+                    metadata.append({"url":chunk.get("url"," "),"title":chunk.get('title','')})
+
+                if isinstance(embeddings, TfidfEmbeddings):
+                    embeddings.fit(texts)
+                    embeddings.save(embeddings_path)
+
+                logger.info("Populating vector store with chunks...")
+                vector_store.setup(doc_ids, texts,metadata,batch_size=BATCH_SIZE,reset=RESET)
+                logger.info(f"Vector store populated with {len(doc_ids)} chunks")
+            else:
+                logger.warning("No chunks available to populate the vector store.")
+        return lm, vector_store
+
+    logger.info("Creating retrieval systems...")
+    lm_retriever, vector_store = get_or_create_system(force=force)
+    
+    logger.info(f"Initializing WebSearcher")
+    web_searcher = WebSearcher(normalizer=normalizer)
+    logger.info(f"WebSearcher initialized -> {web_searcher}")
+    logger.info("Initializing QueryProcessor...")
+    query_processor = QueryProcessor(normalizer=normalizer)
+    logger.info(f"QueryProcessor initialized -> {query_processor}")
+    logger.info("Initializing ResultRanker...")
+    ranker = ResultRanker()
+    logger.info(f"ResultRanker initialized -> {ranker}")
+    logger.info("Initializing RAGpipeline ...")
+    rag = RAGPipeline(
             retriever_lm=lm_retriever,
             vector_store=vector_store,
             web_searcher=web_searcher,
             query_processor=query_processor,
             ranker=ranker,
+            relevance_threshold=RAG_RELEVANCE_THRESHOLD
         )
-        
-        # Initialize standalone Answer Generator (generation only)
-        logger.info("Initializing Answer Generator...")
-        
-        # Find or download model
-        model_path_resolved = str(ModelDownloader.ensure_model_exists(model_path))
-        logger.info(f"Using model: {model_path_resolved}")
-        
-        from langchain_community.llms import LlamaCpp
-        llm = LlamaCpp(
+    logger.info(f"RAGpipeline initialized -> {rag}")
+    logger.info("Initializing Answer Generator...")
+    model_path_resolved = str(ModelDownloader.ensure_model_exists(model_path))
+    logger.info(f"Using model: {model_path_resolved}")
+    llm = LlamaCpp(
             model_path=model_path_resolved,
             temperature=MODEL_TEMPERATURE,
             max_tokens=MODEL_MAX_TOKENS,
             n_ctx=MODEL_N_CTX,
             verbose=MODEL_VERBOSE,
         )
-        generator = AnswerGenerator(llm=llm)
-        
-        logger.info("✓ SRI system initialized successfully")
-        return rag, get_or_create_system, lm_retriever, vector_store, generator
+    generator = AnswerGenerator(llm=llm)
+    logger.info(f"AnswerGenerator initialized -> {generator}")
+    logger.info("✓ SRI system initialized successfully")
+    return indexer,generator,rag,normalizer,ranker,lm_retrieval,search_internet,vector_db,chunker,rocchio
 
-    except Exception as exc:
-        logger.error(f"Failed to initialize system: {exc}", exc_info=True)
-        raise
-
-
-def create_status_checker(rag, lm_retriever, vector_store):
-    """Create a status checker function."""
-
-    def check_status():
-        """Check the status of all components."""
-        try:
-            lm_stats = lm_retriever.stats() if lm_retriever else None
-            vector_stats = vector_store.stats() if vector_store else None
-
-            return {
-                "status": "healthy",
-                "lm_retriever_available": lm_retriever is not None,
-                "vector_store_available": vector_store is not None,
-                "lm_stats": lm_stats,
-                "vector_stats": vector_stats,
-                "model_info": rag.llm.model_path if hasattr(rag, 'llm') and hasattr(rag.llm, 'model_path') else "Llama 1.1B",
-                "message": "All systems operational",
-            }
-        except Exception as exc:
-            logger.error(f"Error checking status: {exc}")
-            return {
-                "status": "degraded",
-                "lm_retriever_available": False,
-                "vector_store_available": False,
-                "message": f"Error: {exc}",
-            }
-
-    return check_status
-
-
-def main(model_path):
+async def _init_app(_indenxer, _generator,  
+                _rag_pipeline, _text_normalizer, 
+                _ranker, lm_retrieval, search_internet, 
+                 vector_db,chunker,rocchio)->None:
+                globals = {
+                '_indenxer':_indenxer,
+                '_generator':_generator,
+                '_rag_pipeline':_rag_pipeline,
+                '_text_normalizer':_text_normalizer,
+                '_ranker':_ranker,
+                'lm_retrieval':lm_retrieval,
+                'search_internet':search_internet,
+                'vector_db':vector_db,
+                'chunker':chunker,
+                "rocchio":rocchio
+                }
+                set_dependencies(globals)
+                
+  
+async def main(model_path):
     """Main entry point."""
     try:
-        # Initialize system
-        rag, get_or_create_system, lm_retriever, vector_store, generator = initialize_system(
-            model_path, force=False
-        )
-
-        # Initialize API
-        from src.api.app import app, init_api
-
-        status_checker = create_status_checker(rag, lm_retriever, vector_store)
-        init_api(rag, get_or_create_system, status_checker, generator)
-
-        logger.info("✓ API initialized successfully")
-        logger.info("Starting FastAPI server...")
-        logger.info("API available at: http://localhost:8000")
-        logger.info("Docs available at: http://localhost:8000/docs")
-
-        import uvicorn
-
-        uvicorn.run(
-            app,
-            host=API_HOST,
-            port=API_PORT,
-            log_level="info",
-        )
+        async def run():
+            t = time.time()
+            _indenxer, _generator, _rag_pipeline, _text_normalizer, _ranker, lm_retrieval, search_internet, vector_db,chunker,rocchio = await initialize_components(model_path,force=FORCE)
+            await _init_app(_indenxer, _generator, _rag_pipeline, _text_normalizer, _ranker, lm_retrieval, search_internet, vector_db,chunker,rocchio)
+            config = uvicorn.Config(app, host=API_HOST, port=API_PORT, log_level="info")
+            server = uvicorn.Server(config)
+            logger.info("✓ API initialized successfully")
+            logger.info("Starting FastAPI server...")
+            logger.info("API available at: http://localhost:8000")
+            logger.info("Docs available at: http://localhost:8000/docs")
+            logger.info(f"Initialization completed in {time.time() - t:.2f} seconds")
+            await server.serve()
+            
+        await run()
+       
 
     except Exception as exc:
         logger.error(f"Fatal error: {exc}", exc_info=True)
         sys.exit(1)
 
-
-if __name__ == "__main__":
-    main(model_path=MODEL_PATH)

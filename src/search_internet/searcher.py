@@ -12,6 +12,8 @@ from src.indexing.indexer import TextNormalizer
 DIRECT_ENGINES = {
     "yandex": "https://yandex.com/search/?text={query}",
     "brave": "https://search.brave.com/search?q={query}",
+    "google": "https://www.google.com/search?q={query}", 
+    "bing": "https://www.bing.com/search?q={query}",
 }
 
 class WebSearcher:
@@ -22,7 +24,7 @@ class WebSearcher:
     def __init__(self, max_results: int | None = None, normalizer: TextNormalizer | None = None, engine: str | None = None):
         raw = (engine or WEB_SEARCH_ENGINE).lower()
         if raw == "all":
-            self.engines = ["duckduckgo", "yandex", "brave"]
+            self.engines = ["duckduckgo", "yandex", "brave","google","bing"]
         else:
             self.engines = [e.strip() for e in raw.replace(",", " ").split()]
         actual_max_results = max_results if max_results is not None else WEB_SEARCH_MAX_RESULTS
@@ -41,7 +43,7 @@ class WebSearcher:
             if res.get("link") and "youtube.com" not in res.get("link", "")
         ]
 
-        urls = [res.get("link", "") for res in filtered]
+        urls = list(set([res.get("link", "") for res in filtered]))
 
         logger.info(f"Fetching full content from {len(urls)} URLs...")
         contents = self.content_fetcher.fetch_all(urls)

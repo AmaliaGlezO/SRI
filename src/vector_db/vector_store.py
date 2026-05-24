@@ -11,7 +11,6 @@ from src.config import VECTOR_DB_COLLECTION_NAME, VECTOR_DB_PERSIST_DIR, VECTOR_
 from src.errors.vector_db_errors import VectorStoreOperationError
 from src.utils.logger import vector_logger as logger
 
-
 class VectorStore:
     """
     Vector database using Chroma DB via LangChain.
@@ -29,13 +28,16 @@ class VectorStore:
             persist_directory=self._persist_dir,
             collection_metadata={"hnsw:space": "cosine"},
         )
-
+    
+    def __str__(self):
+        return f"VectorStore (Chroma LC: {self.COLLECTION_NAME})"
+    
     def setup(
             self,
             doc_ids: list[str],
             texts: list[str],
-            metadatas: list[dict],
-            reset: bool = True,
+            metadata: list[str] = None,
+            reset: bool = False,
             batch_size: int = 5000,
         ) -> None:
             """
@@ -53,143 +55,127 @@ class VectorStore:
 
                 logger.info(f"Adding {len(doc_ids)} documents to Chroma in batches...")
 
-                # Clean metadata using numpy
-                clean_metadatas = np.array([self._clean_metadata(m) for m in metadatas], dtype=object)
-
-                # Convert to numpy for efficient slicing
-                doc_ids_arr = np.array(doc_ids, dtype=object)
-                texts_arr = np.array(texts, dtype=object)
-
+                if metadata is None:
+                    metadata = [{} for _ in range(len(doc_ids))]
+                
+                metadata = [{"url": m} if isinstance(m, str) else m for m in metadata]
+                
                 total = len(doc_ids)
                 num_batches = int(np.ceil(total / batch_size))
-
-                # Use tqdm for progress
-                pbar = tqdm(total=total, desc="Adding to Chroma", unit="docs")
+                
+                
+                pbar = tqdm(total=num_batches, desc="Adding batches to Chroma", unit="batch")
                 
                 for batch_idx in range(num_batches):
                     start = batch_idx * batch_size
                     end = min(start + batch_size, total)
                     
-                    batch_ids = doc_ids_arr[start:end].tolist()
-                    batch_texts = texts_arr[start:end].tolist()
-                    batch_metadatas = clean_metadatas[start:end].tolist()
+                    batch_ids = doc_ids[start:end]
+                    batch_texts = texts[start:end]
+                    metadata_batch = metadata[start:end]
                     
                     self._vectorstore.add_texts(
                         texts=batch_texts,
-                        metadatas=batch_metadatas,
                         ids=batch_ids,
+                        metadatas=metadata_batch
                     )
                     
-                    pbar.update(end - start)
-                    pbar.set_postfix({"batch": f"{batch_idx + 1}/{num_batches}"})
+                    pbar.update(1)
+                    pbar.set_postfix({
+                        "docs": f"{end}/{total}",
+                        "batch": f"{batch_idx + 1}/{num_batches}"
+                    })
 
                 pbar.close()
+                logger.info(f"Successfully added {total} documents in {num_batches} batches")
 
-                logger.info(
-                    f"Initialised with {self.stats()['num_documents']} documents."
-                )
             except Exception as exc:
                 raise VectorStoreOperationError("Failed to setup vector store.") from exc
 
     async def add_documents(self, documents: list[Any], batch_size: int = 5000) -> None:
-            """
-            Add LangChain Document objects to the store. Uses numpy batching + tqdm.
-            """
-            try:
-                logger.info(f"Adding {len(documents)} documents to Chroma in batches...")
+        """
+        Add LangChain Document objects to the store. Uses numpy batching + tqdm.
+        """
+        try:
+            total = len(documents)
+            num_batches = int(np.ceil(total / batch_size))
+            
+            logger.info(f"Adding {total} documents to Chroma in {num_batches} batches...")
 
-                # Convert to numpy
-                docs_arr = np.array(documents, dtype=object)
-                total = len(documents)
-                num_batches = int(np.ceil(total / batch_size))
-
-                pbar = tqdm(total=total, desc="Adding to Chroma", unit="docs")
+            pbar = tqdm(total=num_batches, desc="Adding batches to Chroma", unit="batch")
+            
+            for batch_idx in range(num_batches):
+                start = batch_idx * batch_size
+                end = min(start + batch_size, total)
+                batch = documents[start:end]
                 
-                for batch_idx in range(num_batches):
-                    start = batch_idx * batch_size
-                    end = min(start + batch_size, total)
-                    batch = docs_arr[start:end].tolist()
-                    
-                    # Clean metadata in batch
-                    for doc in batch:
-                        doc.metadata = self._clean_metadata(doc.metadata)
-
-                    self._vectorstore.add_documents(batch)
-                    
-                    pbar.update(end - start)
-                    pbar.set_postfix({"batch": f"{batch_idx + 1}/{num_batches}"})
-
-                pbar.close()
+                if batch_idx > 0 and batch_idx % max(1, num_batches // 10) == 0:
+                    logger.info(f"Progress: {end}/{total} documents ({end/total*100:.1f}%)")
                 
-                logger.info(f"Total documents: {self.stats()['num_documents']}")
-            except Exception as exc:
-                raise VectorStoreOperationError("Failed to add documents.") from exc
+                self._vectorstore.add_documents(batch)
+                pbar.update(1)
+                pbar.set_postfix({
+                    "docs": f"{end}/{total}",
+                    "batch": f"{batch_idx + 1}/{num_batches}"
+                })
+
+            pbar.close()
+            
+            logger.info(f"Total documents in store: {self.stats()['num_documents']}")
+        except Exception as exc:
+            raise VectorStoreOperationError("Failed to add documents.") from exc
 
     def search(self, query: str, top_k: int | None = None) -> list[dict]:
-            """
-            Rank documents by similarity.
-            """
-            if top_k is None:
-                top_k = VECTOR_DB_TOP_K
-            try:
-                results = self._vectorstore.similarity_search_with_relevance_scores(
-                    query,
-                    k=top_k,
+        """
+        Rank documents by similarity.
+        """
+        if top_k is None:
+            top_k = VECTOR_DB_TOP_K
+        try:
+            results = self._vectorstore.similarity_search_with_relevance_scores(
+                query,
+                k=top_k,
+            )
+
+            output = []
+            for i, (doc, score) in enumerate(results, start=1):
+                metadata = doc.metadata
+                output.append(
+                    {
+                        "rank": i,
+                        "doc_id": doc.id
+                        if hasattr(doc, "id")
+                        else metadata.get("url", ""),
+                        "score": round(score, 6),
+                        "title": metadata.get("title", ""),
+                        "url": metadata.get("url", ""),
+                        "source": metadata.get("source", ""),
+                        "content": doc.page_content,
+                        "content_preview": doc.page_content[:200] + "...",
+                        "metadata": metadata,
+                    }
                 )
 
-                output = []
-                for i, (doc, score) in enumerate(results, start=1):
-                    metadata = doc.metadata
-                    output.append(
-                        {
-                            "rank": i,
-                            "doc_id": doc.id
-                            if hasattr(doc, "id")
-                            else metadata.get("url", ""),
-                            "score": round(score, 6),
-                            "title": metadata.get("title", ""),
-                            "url": metadata.get("url", ""),
-                            "source": metadata.get("source", ""),
-                            "content_preview": doc.page_content[:200] + "...",
-                            "metadata": metadata,
-                        }
-                    )
-
-                return output
-            except Exception as exc:
-                raise VectorStoreOperationError("Vector search failed.") from exc
+            return output
+        except Exception as exc:
+            raise VectorStoreOperationError("Vector search failed.") from exc
 
     def as_retriever(self, **kwargs):
-            """Return the LangChain retriever interface."""
-            return self._vectorstore.as_retriever(**kwargs)
+        """Return the LangChain retriever interface."""
+        return self._vectorstore.as_retriever(**kwargs)
 
     def stats(self) -> dict:
-            # Chroma LangChain doesn't expose count directly easily without accessing _collection
-            try:
-                count = self._vectorstore._collection.count()
-                return {
-                    "num_documents": count,
-                    "collection_name": self.COLLECTION_NAME,
-                }
-            except Exception as exc:
-                raise VectorStoreOperationError("Failed to read vector store stats.") from exc
-
-    @staticmethod
-    def _clean_metadata(metadata: dict) -> dict:
-            """Convert metadata to Chroma-compatible scalar values."""
-            clean = {}
-            for key, value in metadata.items():
-                if value is None:
-                    clean[key] = ""
-                elif isinstance(value, (str, int, float, bool)):
-                    clean[key] = value
-                elif isinstance(value, list):
-                    clean[key] = ", ".join(str(v) for v in value)
-                elif isinstance(value, dict):
-                    clean[key] = json.dumps(value, ensure_ascii=False)
-                else:
-                    clean[key] = str(value)
-            return clean
+        try:
+            count = self._vectorstore._collection.count()
+            return {
+                "num_documents": count,
+                "collection_name": self.COLLECTION_NAME,
+            }
+        except Exception as exc:
+            raise VectorStoreOperationError("Failed to read vector store stats.") from exc
 
     def __repr__(self) -> str:
-            return f"VectorStore(Chroma LC: {self.COLLECTION_NAME})"
+        return f"VectorStore(Chroma LC: {self.COLLECTION_NAME})"
+    
+    def __str__(self) -> str:
+        return f"VectorStore(Chroma LC: {self.COLLECTION_NAME})"

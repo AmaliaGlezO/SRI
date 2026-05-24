@@ -2,7 +2,7 @@
 
 from typing import Any, List, Dict
 import re
-
+from src.indexing.indexer import TextNormalizer
 
 class DocumentChunker:
     """
@@ -16,7 +16,7 @@ class DocumentChunker:
     
     def __init__(
         self,
-        chunk_size: int = 3500,
+        chunk_size: int = 1500,
         chunk_overlap: int = 100,
         strategy: str = "sliding",
         min_chunk_size: int = 100,
@@ -32,12 +32,14 @@ class DocumentChunker:
         
         Args:
             doc: Document with 'content', 'title', 'url', etc.
+            normalizer: TextNormalizer instance
+            stopw: Whether to filter stop words
+            stem: Whether to stem tokens
             
         Returns:
             List of chunked documents
         """
         content = doc.get("content", "")
-        title = doc.get("title", "")
         
         if not content:
             return [doc]
@@ -47,7 +49,7 @@ class DocumentChunker:
         elif self.strategy == "paragraph":
             return self._chunk_paragraph(doc, content)
         elif self.strategy == "sliding":
-            return self._chunk_sliding(doc, content)
+            return self._chunk_sliding(doc, content,)
         else:
             return [doc]
     
@@ -61,6 +63,7 @@ class DocumentChunker:
             chunk_text = content[start:end]
             if not chunk_text:
                 continue
+        
             if len(chunk_text) >= self.min_chunk_size:
                 chunk_doc = {
                     **doc,
@@ -117,7 +120,6 @@ class DocumentChunker:
             end = start + self.chunk_size
             chunk_words = words[start:end]
             chunk_text = " ".join(chunk_words)
-            
             if len(chunk_words) >= self.min_chunk_size:
                 chunk_doc = {
                     **doc,
@@ -144,6 +146,9 @@ class DocumentChunker:
         
         Args:
             docs: List of documents
+            normalizer: TextNormalizer instance
+            stopw: Whether to filter stop words
+            stem: Whether to stem tokens
             
         Returns:
             List of chunked documents
@@ -151,8 +156,12 @@ class DocumentChunker:
         all_chunks = []
         
         for doc in docs:
+            if "tv" in doc.get("url",''):
+                continue
             chunks = self.chunk_document(doc)
             all_chunks.extend(chunks)
         
         return all_chunks
 
+    def __str__(self) -> str:
+        return f"DocumentChunker(chunk_size={self.chunk_size}, chunk_overlap={self.chunk_overlap}, strategy={self.strategy}, min_chunk_size={self.min_chunk_size})"

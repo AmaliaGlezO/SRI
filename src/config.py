@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
+
 load_dotenv()
 
 def _get_env_bool(key: str, default: bool = False) -> bool:
@@ -69,10 +70,10 @@ USE_GPU = _get_env_bool("USE_GPU", False)
 # Relevance threshold for triggering web search
 RAG_RELEVANCE_THRESHOLD = _get_env_float("RAG_RELEVANCE_THRESHOLD", 0.4)
 
-# Pseudo-Relevance Feedback (PRF) settings
-RAG_ENABLE_PRF = _get_env_bool("RAG_ENABLE_PRF", True)
-RAG_PRF_K = _get_env_int("RAG_PRF_K", 5)
-RAG_PRF_TERMS = _get_env_int("RAG_PRF_TERMS", 10)
+# Query expansion settings
+RAG_ENABLE_QUERY_EXPANSION = _get_env_bool("RAG_ENABLE_QUERY_EXPANSION", True)
+RAG_QUERY_EXPANSION_TERMS = _get_env_int("RAG_QUERY_EXPANSION_TERMS", 10)
+RAG_COOCCURRENCE_WINDOW = _get_env_int("RAG_COOCCURRENCE_WINDOW", 1)
 
 # Retriever weights (LM vs Vector)
 RAG_LM_RETRIEVER_WEIGHT = _get_env_float("RAG_LM_RETRIEVER_WEIGHT", 0.5)
@@ -113,7 +114,8 @@ VECTOR_DB_COLLECTION_NAME = _get_env_str(
 )
 VECTOR_DB_PERSIST_DIR = str((INDEXES_DIR / "chroma_langchain").absolute())
 VECTOR_DB_TOP_K = _get_env_int("VECTOR_DB_TOP_K", 10)
-
+BATCH_SIZE = _get_env_int("BATCH_SIZE",5000)
+RESET= _get_env_bool("RESET",False)
 # ============================================================================
 # WEB SEARCH CONFIGURATION
 # ============================================================================
@@ -130,13 +132,27 @@ WEB_SEARCH_TIME = _get_env_str("WEB_SEARCH_TIME", "y")
 API_HOST = _get_env_str("API_HOST", "0.0.0.0")
 API_PORT = _get_env_int("API_PORT", 8000)
 API_CORS_ORIGINS = _get_env_str("API_CORS_ORIGINS", "*").split(",")
-
-# ============================================================================
+FORCE = _get_env_bool("FORCE",False)
+# ====================================
+# ========================================
 # INDEXING CONFIGURATION
 # ============================================================================
+CHUNK_SIZE=_get_env_int("CHUNK_SIZE", 1500)
+CHUNK_OVERLAP=_get_env_int("CHUNK_OVERLAP", 100)
+STRATEGY=_get_env_str("STRATEGY", "sliding")
+MIN_CHUNK_SIZE=_get_env_int("MIN_CHUNK_SIZE", 100)
 
 INDEX_LANGUAGE = _get_env_str("INDEX_LANGUAGE", "spanish")
 INDEX_SAVE_DIR = str((INDEXES_DIR).absolute())
+#LMretrieval
+MU = _get_env_float("MU",2000.0)
 
+#TFIDF Fallback
+MAX_FEATURES = _get_env_int("MAX_FEATURES", 15000)
 
 DEFAULT_TIMEOUT = _get_env_int(os.getenv("DEFAULT_TIMEOUT",15),15)
+
+
+ALPHA = _get_env_float(os.getenv("ALPHA",1.0),1.0)
+BETA = _get_env_float(os.getenv("BETA",0.75),0.75)
+GAMMA =_get_env_float(os.getenv("GAMMA",0.15),0.15)

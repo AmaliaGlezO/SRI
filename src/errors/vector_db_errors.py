@@ -16,3 +16,6 @@ class EmbeddingsModelNotFoundError(VectorDBError):
 
 class VectorStoreOperationError(VectorDBError):
 	"""Raised when vector store setup, insert or search operations fail."""
+	
+class TimeoutError(Exception):
+    pass

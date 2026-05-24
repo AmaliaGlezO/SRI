@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 from typing import Iterator
 
-from src.errors.indexing_errors import DocumentParseError, SnapshotLoadError
+from src.errors.indexing_errors import DocumentParseError
 from src.utils.logger import indexing_logger as logger
 
 
@@ -105,17 +105,8 @@ class DocumentStore:
             "date": raw.get("date"),
             "scraped_at": raw.get("scraped_at"),
             "source": raw.get("source", ""),
-            "tags": raw.get("tags") or ["Unknowns"],
+            "tags": raw.get("tags") or [""],
             "category": category,
-            "subcategory": raw.get("category") or "",
-            "brand": raw.get("brand"),
-            "os": raw.get("os"),
-            "device_name": raw.get("device_name"),
-            "article_type": raw.get("article_type"),
-            "specs": raw.get("specs") or {},
-            "price": raw.get("price"),
-            "release_date": raw.get("release_date"),
-            "metadata": raw.get("metadata") or {},
         }
 
     def get_by_id(self, doc_id: str) -> dict | None:
@@ -144,32 +135,6 @@ class DocumentStore:
     def __repr__(self) -> str:
         cats = {c: len(self.get_by_category(c)) for c in self.CATEGORIES}
         return f"DocumentStore(total={len(self)}, by_category={cats})"
-
-    def save_snapshot(self, path: str | Path) -> None:
-        """Write all documents to a single JSONL snapshot file."""
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "w", encoding="utf-8") as fh:
-            for doc in self._docs.values():
-                fh.write(json.dumps(doc, ensure_ascii=False) + "\n")
-        logger.info(f"Snapshot saved: {len(self)} docs → {path}")
-
-    @classmethod
-    def from_snapshot(cls, path: str | Path) -> "DocumentStore":
-        """Load a store from a previously saved snapshot file."""
-        store = cls.__new__(cls)
-        store.data_dir = Path(path).parent
-        store._docs = {}
-        line_no = 0
-        try:
-            with open(path, "r", encoding="utf-8") as fh:
-                for line_no, line in enumerate(fh, start=1):
-                    line = line.strip()
-                    if line:
-                        doc = json.loads(line)
-                        store._docs[doc["id"]] = doc
-        except Exception as exc:
-            raise SnapshotLoadError(
-                f"Failed to load snapshot from {path} (line {line_no})."
-            ) from exc
-        return store
+    def __str__(self) -> str:
+        cats = {c: len(self.get_by_category(c)) for c in self.CATEGORIES}
+        return  f"DocumentStore(total={len(self)}, by_category={cats})"

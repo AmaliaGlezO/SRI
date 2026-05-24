@@ -1,4 +1,4 @@
-FROM node:22-slim AS builder
+FROM node:22-slim AS deps
 
 WORKDIR /app
 
@@ -7,6 +7,16 @@ COPY package.json ./
 
 # Install dependencies (avoid lockfile to keep it platform-agnostic)
 RUN npm install --no-package-lock
+
+FROM deps AS dev
+
+COPY . .
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+
+FROM deps AS builder
 
 # Copy the rest of the application
 COPY . .

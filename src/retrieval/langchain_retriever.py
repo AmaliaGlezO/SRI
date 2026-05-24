@@ -38,5 +38,4 @@ class LangChainLMRetriever(BaseRetriever):
             )
             doc.metadata["score"] = max(0.0, min(1.0, float(score)))
             documents.append(doc)
-
         return documents

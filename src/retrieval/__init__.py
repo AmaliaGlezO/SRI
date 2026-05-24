@@ -2,7 +2,7 @@
 Retrieval module.
 
 Provides:
-    - QueryProcessor : query expansion, normalisation and result re-ranking
+    - QueryProcessor : query expansion and normalisation
 """
 
 from .lm_retriever import LMRetriever

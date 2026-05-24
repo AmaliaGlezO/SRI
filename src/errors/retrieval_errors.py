@@ -15,4 +15,4 @@ class QueryFormatError(RetrievalError):
 
 
 class QueryProcessingError(RetrievalError):
-	"""Raised when query preprocessing or PRF expansion fails."""
+	"""Raised when query preprocessing or query expansion fails."""

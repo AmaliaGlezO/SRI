@@ -11,24 +11,27 @@ from src.utils.logger import get_logger
 from src.config import DEFAULT_TIMEOUT 
 logger = get_logger("ContentFetcher")
 
-
-
 class ContentFetcher:
     """Fetch and extract main content from web pages."""
 
-    BROWSER_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "es-ES,es;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
-        "Cache-Control": "no-cache",
-        "DNT": "1",
-    }
+ 
 
     def __init__(self, timeout: int = DEFAULT_TIMEOUT):
         self.timeout = timeout
         self.session = requests.Session()
-        self.session.headers.update(self.BROWSER_HEADERS)
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'es-ES,es;q=0.8,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
+        })
         #self.scraper = cloudscraper.create_scraper()
 
     def _get(self, url: str) -> requests.Response:
@@ -111,4 +114,4 @@ class ContentFetcher:
 def fetch_content_from_urls(urls: List[str], timeout: int = DEFAULT_TIMEOUT) -> List[str]:
     """Convenience function to fetch content from URLs."""
     fetcher = ContentFetcher(timeout=timeout)
-    return fetcher.fetch_all(urls)
+    return fetcher.fetch_all(urls) 

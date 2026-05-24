@@ -2,9 +2,8 @@
 
 import json
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 from dataclasses import dataclass, asdict
-from datetime import datetime
 import numpy as np
 
 
@@ -24,19 +23,8 @@ class QueryStats:
     top_k: int
     top_score: float
     num_sources: int
-    use_prf: bool
+    use_query_expansion: bool
     use_rag: bool
-
-
-@dataclass
-class SessionData:
-    """Session data with token history."""
-    session_id: str
-    created_at: str
-    total_input_tokens: int = 0
-    total_output_tokens: int = 0
-    query_count: int = 0
-    avg_top_score: float = 0.0
 
 
 class Stats:
@@ -71,7 +59,7 @@ class Stats:
                     self.internet_search_count = data.get("internet_search_count", 0)
                     self.avg_top_score = data.get("avg_top_score", 0)
                     self.sessions = data.get("sessions", {})
-            except:
+            except Exception:
                 self._init_global()
         else:
             self._init_global()
@@ -229,7 +217,6 @@ class Stats:
             },
             "recent_queries": recent[:5],
         }
+    def __str__(self) -> str:
+        return "Stats()"
 
-
-# Global instance
-stats = Stats()

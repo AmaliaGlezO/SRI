@@ -6,8 +6,7 @@ from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 import logging
 
-from src.api.models import ErrorResponse
-from src.api.routes import query, indexing, health
+from src.api.routes import query
 from src.errors.rag_errors import RAGError
 from src.errors.indexing_errors import IndexingError
 from src.errors.retrieval_errors import RetrievalError
@@ -16,28 +15,6 @@ from src.errors.llm_errors import LLMError, LLMModelNotFoundError
 
 logger = logging.getLogger(__name__)
 
-
-# Global state
-_rag_pipeline = None
-_system_initializer = None
-_status_checker = None
-_generator = None
-
-
-def init_api(rag_pipeline, system_initializer, status_checker, generator=None):
-    """Initialize API with dependencies."""
-    global _rag_pipeline, _system_initializer, _status_checker, _generator
-
-    _rag_pipeline = rag_pipeline
-    _system_initializer = system_initializer
-    _status_checker = status_checker
-    _generator = generator
-
-    # Inject dependencies into routers
-    query.set_rag_pipeline(rag_pipeline)
-    query.set_generator(generator)
-    indexing.set_system_initializer(system_initializer)
-    health.set_status_checker(status_checker)
 
 
 @asynccontextmanager
@@ -170,12 +147,9 @@ async def root():
         "name": "SRI RAG System API",
         "version": "1.0.0",
         "docs": "/docs",
-        "status_endpoint": "/status",
-        "health_endpoint": "/health",
     }
 
 
 
 app.include_router(query.router,prefix="/api")
-app.include_router(indexing.router,prefix="/api")
-app.include_router(health.router,prefix="/api")
+

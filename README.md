@@ -65,9 +65,9 @@ Copia `.env.example` a `.env` y ajusta los valores según necesidad.
 | Variable | Descripción | Por Defecto |
 |----------|-------------|-------------|
 | `RAG_RELEVANCE_THRESHOLD` | Umbral para activar búsqueda web (0.0-1.0) | 0.4 |
-| `RAG_ENABLE_PRF` | Habilitar Pseudo-Relevance Feedback | true |
-| `RAG_PRF_K` | Número de documentos top para PRF | 5 |
-| `RAG_PRF_TERMS` | Número de términos para expansión | 10 |
+| `RAG_ENABLE_QUERY_EXPANSION` | Habilitar expansión de query por coocurrencia | true |
+| `RAG_QUERY_EXPANSION_TERMS` | Número de términos para expansión | 10 |
+| `RAG_COOCCURRENCE_WINDOW` | Ventana espacial para matriz de coocurrencia | 1 |
 | `RAG_LM_RETRIEVER_WEIGHT` | Peso del retriever LM (0.0-1.0) | 0.5 |
 | `RAG_VECTOR_RETRIEVER_WEIGHT` | Peso del retriever vector (0.0-1.0) | 0.5 |
 | `RAG_RETRIEVER_K` | Número de documentos a recuperar | 3 |
@@ -135,7 +135,7 @@ Cuerpo de la petición:
   "query": "¿Cuál es el mejor móvil de 2024?",
   "use_rag": true,
   "top_k": 5,
-  "use_prf": true,
+  "use_query_expansion": true,
   "use_internet_search": true,
   "temperature": 0.3,
   "relevance_threshold": 0.4,

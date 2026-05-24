@@ -17,12 +17,11 @@ class LangChainVectorRetriever(BaseRetriever):
     def _get_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> List[Document]:
-        # Use similarity_search_with_relevance_scores to get scores
+        
         results = self.vectorstore.similarity_search_with_relevance_scores(query, k=self.k)
         
         documents = []
         for doc, score in results:
-            # Ensure score is in metadata and within [0, 1] range
             doc.metadata["score"] = max(0.0, min(1.0, float(score)))
             documents.append(doc)
         

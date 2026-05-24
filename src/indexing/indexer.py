@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+from datetime import datetime
 import json
 import pickle
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
 import nltk
+import logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 from nltk.corpus import stopwords
 from nltk.stem import SnowballStemmer
@@ -17,10 +24,8 @@ from src.errors.indexing_errors import (
     InvalidDocumentError,
     
 )
-from src.indexing.chunker import DocumentChunker
 from src.utils.logger import indexing_logger as logger
 import emoji
-
 
 
 
@@ -45,11 +50,10 @@ class TextNormalizer:
         self.language = language
         self._stemmer = SnowballStemmer(language)
 
-    def normalize(self, text: str) -> list[str]:
+    def normalize(self, text: str, stem: bool = False, stopw: bool = True) -> list[str]:
         """Return a list of normalised tokens from *text*."""
         if not text:
             return []
-
         # lowercase
         text = text.lower()
 
@@ -57,23 +61,28 @@ class TextNormalizer:
         text = re.sub(r"https?://\S+|www\.\S+", " ", text)
 
         # strip non-alphanumeric (keep letters, digits and spaces)
-        text = re.sub(r"[^a-záéíóúüñ\w\s]", " ", text, flags=re.UNICODE)
-
+        text = re.sub(r"[^a-záéíóúüñ\w\s-]", " ", text, flags=re.UNICODE)
         # remove emojis
         text = emoji.replace_emoji(text, replace="")
-        
+        text = re.sub(r"\s+", " ", text).strip()
         # tokenize
         tokens = word_tokenize(text, language="spanish")
 
-        # filter stop-words and short tokens
-        tokens = [t for t in tokens if t not in _STOP_WORDS]
+        # stem
+        if stem:
+            tokens = [self._stemmer.stem(t) for t in tokens]
+
+        if stopw:
+            #stop-words
+            tokens = [t for t in tokens if t not in _STOP_WORDS]
 
         return tokens
 
     def normalize_query(self, query: str) -> list[str]:
         """Normalise a user query."""
         return self.normalize(query)
-
+    def __str__(self) -> str:
+        return f"TextNormalizer(language={self.language})"
 
 class InvertedIndex:
     """
@@ -94,11 +103,10 @@ class InvertedIndex:
 
     def __init__(
         self,
-        normalizer: TextNormalizer | None = None,
-        chunker: DocumentChunker | None = None,
+        normalizer: TextNormalizer = None,
     ) -> None:
-        self.normalizer = normalizer or TextNormalizer()
-        self.chunker = chunker
+        self.normalizer = normalizer 
+    
 
         self._index: dict[str, dict[str, int]] = defaultdict(dict)
         self._doc_info: dict[str, dict] = {}
@@ -114,31 +122,31 @@ class InvertedIndex:
             - "content" : str – main text to index
             - "title"   : str (optional) – boosted at index time
 
-        If a chunker is configured, documents will be split into smaller chunks
-        before indexing for better retrieval granularity.
         """
         self._index = defaultdict(dict)
         self._doc_info = {}
         self._N = 0
         
-        
+        logger.info(f"Building index from {len(documents)} documents...")
 
-        for doc in documents:
+        for i,doc in enumerate( documents):
             if not isinstance(doc, dict):
                 raise InvalidDocumentError(
                     "Each indexed document must be a dictionary."
                 )
-            doc_id = str(doc.get("id") or doc.get("chunk_id") or doc.get("url", ""))
+            if i%500==0:
+                logger.info(f"{i}/{len(documents)}")
+            
+            doc_id = str(doc.get("chunk_id") or {datetime.now().isoformat()} or doc.get("id") or doc.get("url", "doc_" + str(i)))
             title = doc.get("title", "") or ""
             content = doc.get("content", "") or ""
-
             if not doc_id:
                 raise InvalidDocumentError(
                     "Each document must define either 'id' or 'chunk_id' or 'url'."
                 )
 
             text = title + " " + content
-            tokens = self.normalizer.normalize(text)
+            tokens = self.normalizer.normalize(text,stopw=True, stem=True)
 
             if not tokens:
                 continue
@@ -157,65 +165,12 @@ class InvertedIndex:
                 "source": doc.get("source", ""),
                 "date": doc.get("date", ""),
                 "author": doc.get("author", ""),
-                "tags": doc.get("tags", []),
             }
             self._N += 1
 
         self._vocab = set(self._index.keys())
         logger.info(f"Built index: {self._N} documents, {len(self._vocab)} terms")
-        
-    def add_documents(self, documents: list[dict]) -> None:
-        """Add new documents to the existing index."""
-        for doc in documents:
-            doc_id = str(doc.get("id") or doc.get("url", ""))
-            title = doc.get("title", "") or ""
-            content = doc.get("content", "") or ""
-            
-            if not doc_id:
-                continue
-            
-            text = title + " " + content
-            tokens = self.normalizer.normalize(text)
-            
-            if not tokens:
-                continue
-            
-            from collections import Counter
-            tf = Counter(tokens)
-            doc_length = len(tokens)
-            
-            for term, count in tf.items():
-                self._index[term][doc_id] = count
-            
-            if doc_id in self._doc_info:
-                self._doc_info[doc_id].update({
-                    "length": doc_length,
-                    "title": title,
-                    "content_preview": " ".join(tokens),
-                    "url": doc.get("url", ""),
-                    "source": doc.get("source", ""),
-                    "date": doc.get("date", ""),
-                    "author": doc.get("author", ""),
-                    "tags": doc.get("tags", []),
-                    "category": doc.get("category", ""),
-                })
-            else:
-                self._doc_info[doc_id] = {
-                    "length": doc_length,
-                    "title": title,
-                    "content_preview": " ".join(tokens),
-                    "url": doc.get("url", ""),
-                    "source": doc.get("source", ""),
-                    "date": doc.get("date", ""),
-                    "author": doc.get("author", ""),
-                    "tags": doc.get("tags", []),
-                    "category": doc.get("category", ""),
-                }
-                self._N += 1
-        
-        self._vocab = set(self._index.keys())
-        logger.info(f"Added {len(documents)} documents. Total: {self._N}")
-
+     
     def save(self, directory: str | Path) -> None:
         """Persist the index to *directory* (created if absent)."""
         path = Path(directory)
@@ -265,7 +220,8 @@ class InvertedIndex:
 
     def __repr__(self) -> str:
         return f"InvertedIndex(docs={self._N}, " f"vocab={len(self._vocab)})"
-
+    def __str__(self) -> str:
+        return f"InvertedIndex(docs={self._N}, " f"vocab={len(self._vocab)})"
     def stats(self) -> dict:
         """Return a summary dict of index statistics."""
         return {
